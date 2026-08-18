@@ -6,6 +6,8 @@ import type { Car, Enemy, EnemyType, World } from './world';
 import type { Input } from './input';
 import { fromAngle, randSpread } from './math';
 import { nearestCarIndex } from './car';
+import { vehicleAtlas } from './sprites';
+import { VEHICLES, VEHICLE_FRAMES } from './vehicles';
 
 export interface Camera {
   x: number;
@@ -170,7 +172,33 @@ function drawDecals(ctx: CanvasRenderingContext2D, w: World): void {
   }
 }
 
+// World units the car must travel to advance one animation frame (wheels spin
+// with distance, so parked cars rest on frame 0).
+const CAR_ANIM_STEP = 16;
+
 function drawCar(ctx: CanvasRenderingContext2D, c: Car): void {
+  const atlas = vehicleAtlas(c.kind, c.color);
+  if (!atlas) {
+    drawCarRect(ctx, c);
+    return;
+  }
+  const spec = VEHICLES[c.kind];
+  const cell = spec.cell;
+  const draw = spec.draw;
+  // Pick the nearest of the 8 perspective sprites, then rotate it by the
+  // leftover angle so the heading is smooth (mismatch is at most +-22.5deg).
+  const step = Math.PI / 4;
+  const k = ((Math.round(c.angle / step) % 8) + 8) % 8;
+  const residual = c.angle - k * step;
+  const frame = Math.floor(c.odo / CAR_ANIM_STEP) % VEHICLE_FRAMES;
+  ctx.save();
+  ctx.translate(c.pos.x, c.pos.y);
+  ctx.rotate(residual);
+  ctx.drawImage(atlas, frame * cell, k * cell, cell, cell, -draw / 2, -draw / 2, draw, draw);
+  ctx.restore();
+}
+
+function drawCarRect(ctx: CanvasRenderingContext2D, c: Car): void {
   ctx.save();
   ctx.translate(c.pos.x, c.pos.y);
   ctx.rotate(c.angle);

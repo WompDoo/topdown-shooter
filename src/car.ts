@@ -8,6 +8,7 @@
 
 import type { Car, World } from './world';
 import type { Input } from './input';
+import { VEHICLES } from './vehicles';
 import { clamp, collideCircleRect, fromAngle, resolveCircleRect } from './math';
 import { addHitstop, addShake, spawnBlood, spawnDeath } from './fx';
 import { sfxEnemyDeath } from './audio';
@@ -34,6 +35,7 @@ const DIVE_TIME = 0.55; // seconds of tumble
 
 export function updateCar(w: World, car: Car, input: Input, dt: number): void {
   const handbrake = input.isDown('Space');
+  const hnd = VEHICLES[car.kind].handling;
 
   // throttle
   let throttle = 0;
@@ -50,7 +52,7 @@ export function updateCar(w: World, car: Car, input: Input, dt: number): void {
   const speed = Math.hypot(car.vel.x, car.vel.y);
   const speedFactor = clamp(speed / STEER_SPEED_REF, 0, 1);
   const dir = travel < -1 ? -1 : 1;
-  car.angle += steer * TURN_RATE * (handbrake ? HB_TURN : 1) * speedFactor * dir * dt;
+  car.angle += steer * TURN_RATE * hnd.turn * (handbrake ? HB_TURN : 1) * speedFactor * dir * dt;
 
   // Decompose velocity onto the NEW heading (same basis for de/recompose keeps
   // the momentum in world space — the car can point one way and slide another).
@@ -61,14 +63,14 @@ export function updateCar(w: World, car: Car, input: Input, dt: number): void {
 
   // engine + rolling resistance on the forward axis (no handbrake braking here —
   // the handbrake is for traction, not stopping)
-  if (throttle > 0) vFwd += ACCEL * dt;
-  else if (throttle < 0) vFwd -= REV_ACCEL * dt;
+  if (throttle > 0) vFwd += ACCEL * hnd.accel * dt;
+  else if (throttle < 0) vFwd -= REV_ACCEL * hnd.accel * dt;
   else vFwd -= Math.sign(vFwd) * Math.min(Math.abs(vFwd), ENGINE_DRAG * dt);
   vFwd *= Math.max(0, 1 - ROLL * dt);
-  vFwd = clamp(vFwd, -MAX_REV, MAX_FWD);
+  vFwd = clamp(vFwd, -MAX_REV * hnd.top, MAX_FWD * hnd.top);
 
   // lateral grip: the tyres bite, or the handbrake lets the back slide
-  vLat *= Math.exp(-(handbrake ? HANDBRAKE_GRIP : GRIP) * dt);
+  vLat *= Math.exp(-(handbrake ? HANDBRAKE_GRIP : GRIP * hnd.grip) * dt);
 
   car.vel = { x: fwd.x * vFwd + right.x * vLat, y: fwd.y * vFwd + right.y * vLat };
   car.speed = vFwd;
@@ -77,6 +79,7 @@ export function updateCar(w: World, car: Car, input: Input, dt: number): void {
   const prevY = car.pos.y;
   car.pos.x += car.vel.x * dt;
   car.pos.y += car.vel.y * dt;
+  car.odo += Math.hypot(car.vel.x, car.vel.y) * dt;
 
   // Tyre marks while the car slides sideways.
   if (Math.abs(vLat) > SKID_MIN && speed > 60) {
@@ -109,6 +112,7 @@ export function updateLooseCar(w: World, car: Car, dt: number): void {
   car.vel.y *= f;
   car.pos.x += car.vel.x * dt;
   car.pos.y += car.vel.y * dt;
+  car.odo += Math.hypot(car.vel.x, car.vel.y) * dt;
   collideCarWalls(w, car);
   carRunOver(w, car);
 }
@@ -161,6 +165,51 @@ function carRunOver(w: World, car: Car): void {
       spawnDeath(w, e.pos, car.angle);
       sfxEnemyDeath();
       addHitstop(w, 0.05);
+    }
+  }
+}
+
+// Push overlapping cars apart and trade momentum along the contact normal, both
+// weighted by vehicle mass, so a truck barges a hatchback aside. Run once per
+// tick after every car has moved. O(n^2), but n is tiny.
+const CAR_RESTITUTION = 0.25; // bounciness of a car-on-car bump
+
+export function resolveCarCollisions(w: World): void {
+  const cars = w.cars;
+  for (let i = 0; i < cars.length; i++) {
+    for (let j = i + 1; j < cars.length; j++) {
+      const a = cars[i];
+      const b = cars[j];
+      let nx = b.pos.x - a.pos.x;
+      let ny = b.pos.y - a.pos.y;
+      let d = Math.hypot(nx, ny);
+      const min = a.radius + b.radius;
+      if (d >= min) continue;
+      if (d < 1e-3) {
+        nx = 1;
+        ny = 0;
+        d = 1e-3;
+      }
+      nx /= d;
+      ny /= d;
+      const imA = 1 / VEHICLES[a.kind].handling.mass;
+      const imB = 1 / VEHICLES[b.kind].handling.mass;
+      const imSum = imA + imB;
+      // separate the overlap, lighter car yields more
+      const overlap = min - d;
+      a.pos.x -= nx * overlap * (imA / imSum);
+      a.pos.y -= ny * overlap * (imA / imSum);
+      b.pos.x += nx * overlap * (imB / imSum);
+      b.pos.y += ny * overlap * (imB / imSum);
+      // bump impulse only if the two are closing
+      const rvn = (b.vel.x - a.vel.x) * nx + (b.vel.y - a.vel.y) * ny;
+      if (rvn < 0) {
+        const jimp = (-(1 + CAR_RESTITUTION) * rvn) / imSum;
+        a.vel.x -= jimp * imA * nx;
+        a.vel.y -= jimp * imA * ny;
+        b.vel.x += jimp * imB * nx;
+        b.vel.y += jimp * imB * ny;
+      }
     }
   }
 }

@@ -7,3 +7,6 @@ dist/
 Thumbs.db
 *.log
 .screenshots/
+
+# Raw vehicle art pack (327 MB). Only the baked atlases in public/sprites ship.
+assets/

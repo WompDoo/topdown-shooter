@@ -4,6 +4,7 @@
 
 import type { Rect, Vec2 } from './math';
 import { v } from './math';
+import { VEHICLES, type VehicleKind } from './vehicles';
 import type { Weapon } from './weapon';
 import {
   ENEMY_RIFLE,
@@ -88,8 +89,10 @@ export interface Car {
   h: number;
   radius: number; // collision circle
   color: string;
+  kind: VehicleKind;
   hp: number;
   occupant: 'none' | 'player';
+  odo: number; // distance travelled, drives the wheel animation
 }
 
 export interface Tracer {
@@ -252,18 +255,21 @@ function makeEnemy(pos: Vec2, etype: EnemyType): Enemy {
   };
 }
 
-function makeCar(pos: Vec2, angle: number, color: string): Car {
+function makeCar(pos: Vec2, angle: number, color: string, kind: VehicleKind = 'sedan'): Car {
+  const spec = VEHICLES[kind];
   return {
     pos: { x: pos.x, y: pos.y },
     angle,
     speed: 0,
     vel: v(),
-    w: 64,
-    h: 30,
-    radius: 26,
+    w: spec.w,
+    h: spec.h,
+    radius: spec.radius,
     color,
+    kind,
     hp: 200,
     occupant: 'none',
+    odo: 0,
   };
 }
 
@@ -306,16 +312,31 @@ export function buildWorld(loadout: Loadout): World {
   const spawn = v(474, 2550);
   const player = makePlayer({ x: spawn.x, y: spawn.y }, loadout);
 
-  const cars: Car[] = [
-    makeCar(v(590, 2550), 0, '#c94f4f'), // race car on the start line
-    makeCar(v(1170, 610), Math.PI / 2, '#4f7dc9'),
-    makeCar(v(610, 1170), 0, '#d8c14a'),
-    makeCar(v(1730, 1730), Math.PI / 2, '#5bb573'),
-    makeCar(v(2290, 610), Math.PI, '#9b6fc9'),
-    makeCar(v(2850, 1170), Math.PI / 2, '#d68a3c'),
-    makeCar(v(3410, 1730), 0, '#4fb0c9'),
-    makeCar(v(2290, 2290), Math.PI, '#b5b55b'),
+  // One of every vehicle type, parked at road intersections (the crossings of
+  // the vertical/horizontal road gaps, so all are clear of buildings). The two
+  // intersections that fall inside the racetrack are skipped. The race car on
+  // the start line is a sedan; the rest cycle through the remaining 22 kinds.
+  const roadX = [610, 1170, 1730, 2290, 2850, 3410];
+  const roadY = [610, 1170, 1730, 2290];
+  const inTrack = new Set(['610,2290', '1170,2290']);
+  const fleet: VehicleKind[] = [
+    'coupe', 'hatchback', 'musclecar', 'sport', 'supercar', 'luxury', 'wagon', 'suv',
+    'minivan', 'van', 'pickup', 'jeep', 'civic', 'micro', 'camper', 'limo', 'taxi',
+    'police', 'ambulance', 'bus', 'boxtruck', 'mediumtruck',
   ];
+  const palette = ['#c94f4f', '#4f7dc9', '#d8c14a', '#5bb573', '#9b6fc9', '#d68a3c', '#4fb0c9', '#b5b55b', '#cfcfd6', '#3a3a42'];
+  const cars: Car[] = [makeCar(v(590, 2550), 0, '#c94f4f')];
+  let fi = 0;
+  for (let yi = 0; yi < roadY.length; yi++) {
+    for (let xi = 0; xi < roadX.length; xi++) {
+      const x = roadX[xi];
+      const y = roadY[yi];
+      if (inTrack.has(`${x},${y}`) || fi >= fleet.length) continue;
+      const angle = (xi + yi) % 2 === 0 ? 0 : Math.PI / 2;
+      cars.push(makeCar(v(x, y), angle, palette[fi % palette.length], fleet[fi]));
+      fi++;
+    }
+  }
 
   // All on road intersections / the central plaza, i.e. open ground clear of the track.
   const spots: [number, number, EnemyType][] = [

@@ -12,6 +12,7 @@ import { addShake, spawnCasing, spawnMuzzle, spawnSlash } from './fx';
 import { sfxDryFire, sfxReload, sfxWeapon } from './audio';
 
 const MOVE_SPEED = 205;
+const SPRINT_MULT = 1.6; // speed boost while holding Shift on foot
 const DIVE_DRAG = 3.2; // ground friction while tumbling out of a car
 
 // Push the player out of walls and cars, then clamp to the world.
@@ -100,7 +101,8 @@ export function updatePlayer(w: World, input: Input, aimWorld: Vec2, dt: number)
   if (input.isDown('KeyS') || input.isDown('ArrowDown')) iy += 1;
   const moveLen = Math.hypot(ix, iy);
   const move: Vec2 = moveLen > 0 ? { x: ix / moveLen, y: iy / moveLen } : { x: 0, y: 0 };
-  p.vel = scale(move, MOVE_SPEED);
+  const sprinting = input.isDown('ShiftLeft') || input.isDown('ShiftRight');
+  p.vel = scale(move, MOVE_SPEED * (sprinting ? SPRINT_MULT : 1));
   if (isMelee && p.swing > 0) {
     const l = wpn.lunge * (p.swing / wpn.swingTime);
     p.vel.x += aimDir.x * l;

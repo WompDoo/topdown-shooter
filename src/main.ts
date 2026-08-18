@@ -6,7 +6,7 @@ import { buildWorld, DEFAULT_LOADOUT } from './world';
 import { updatePlayer } from './player';
 import { updateEnemies } from './enemy';
 import { updateFx } from './fx';
-import { enterCar, exitCar, nearestCarIndex, updateCar, updateLooseCar } from './car';
+import { enterCar, exitCar, nearestCarIndex, resolveCarCollisions, updateCar, updateLooseCar } from './car';
 import { render, type Camera } from './render';
 import { initAudio } from './audio';
 import { clamp, lerp } from './math';
@@ -62,8 +62,6 @@ function fixedUpdate(dt: number): void {
     p.enterTimer = Math.max(0, p.enterTimer - dt);
     if (p.inCar >= 0) {
       updateCar(w, w.cars[p.inCar], input, dt);
-      p.pos.x = w.cars[p.inCar].pos.x;
-      p.pos.y = w.cars[p.inCar].pos.y;
       if (input.pressed('KeyF') && p.enterTimer <= 0) exitCar(w);
     } else {
       updatePlayer(w, input, screenToWorld(input.mouse.x, input.mouse.y), dt);
@@ -75,6 +73,12 @@ function fixedUpdate(dt: number): void {
     // Abandoned / bumped cars keep their momentum and coast on their own.
     for (let i = 0; i < w.cars.length; i++) {
       if (i !== p.inCar) updateLooseCar(w, w.cars[i], dt);
+    }
+    resolveCarCollisions(w);
+    // Keep the driven car and the player pinned together after any shove.
+    if (p.inCar >= 0) {
+      p.pos.x = w.cars[p.inCar].pos.x;
+      p.pos.y = w.cars[p.inCar].pos.y;
     }
     updateEnemies(w, dt);
   } else if (input.pressed('KeyR')) {
