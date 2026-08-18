@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
+    <title>Top-down Shooter</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: #080a0e;
+        cursor: crosshair;
+        font-family: ui-monospace, Menlo, monospace;
+        user-select: none;
+      }
+      #game {
+        position: fixed;
+        inset: 0;
+        display: block;
+      }
+      #boot {
+        position: fixed;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        color: #57d6bf;
+        font-size: 14px;
+        letter-spacing: 0.15em;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="game"></canvas>
+    <div id="boot">LOADING…</div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
