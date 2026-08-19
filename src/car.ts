@@ -10,7 +10,7 @@ import type { Car, World } from './world';
 import type { Input } from './input';
 import type { Vec2 } from './math';
 import { VEHICLES } from './vehicles';
-import { angleDiff, clamp, collideCircleRect, fromAngle, randSpread, resolveCircleRect } from './math';
+import { angleDiff, clamp, collideCircleRect, collideCircleSegment, fromAngle, randSpread, resolveCircleRect } from './math';
 import { addHitstop, addShake, spawnBlood, spawnDeath, spawnExplosion, spawnFire, spawnSmokePuff } from './fx';
 import { sfxEnemyDeath } from './audio';
 
@@ -169,6 +169,28 @@ function collideCarWalls(w: World, car: Car): void {
       car.vel.x *= 1 - WALL_SCRUB;
       car.vel.y *= 1 - WALL_SCRUB;
       impact = Math.max(impact, -vn);
+    }
+  }
+  // Curved circuit guardrails (segments), gated by the track's bounding box.
+  const t = w.track;
+  if (
+    t &&
+    car.pos.x > t.bbox.x - 80 &&
+    car.pos.x < t.bbox.x + t.bbox.w + 80 &&
+    car.pos.y > t.bbox.y - 80 &&
+    car.pos.y < t.bbox.y + t.bbox.h + 80
+  ) {
+    for (const s of t.walls) {
+      const n = collideCircleSegment(car.pos, car.radius, s.a, s.b, t.wallHalf);
+      if (!n) continue;
+      const vn = car.vel.x * n.x + car.vel.y * n.y;
+      if (vn < 0) {
+        car.vel.x -= (1 + WALL_BOUNCE) * vn * n.x;
+        car.vel.y -= (1 + WALL_BOUNCE) * vn * n.y;
+        car.vel.x *= 1 - WALL_SCRUB;
+        car.vel.y *= 1 - WALL_SCRUB;
+        impact = Math.max(impact, -vn);
+      }
     }
   }
   const minX = w.bounds.x + car.radius;

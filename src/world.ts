@@ -3,7 +3,7 @@
 // No fog / stealth — full visibility around the camera. Pure data, no rendering.
 
 import type { Rect, Vec2 } from './math';
-import { v } from './math';
+import { norm, sub, v } from './math';
 import { VEHICLES, type VehicleKind } from './vehicles';
 import type { Weapon } from './weapon';
 import {
@@ -165,11 +165,22 @@ export interface Skid {
   blood?: boolean; // red tyre track laid down just after a run-over
 }
 
-// A racing circuit: paved cells (the driveable surface) with a start/finish
-// line. Its guardrails live in world.barriers; the infield is a building block.
+export interface Seg {
+  a: Vec2;
+  b: Vec2;
+}
+
+// A racing circuit built as a spline ribbon: outer + inner boundary loops (the
+// paved surface between them), guardrail wall segments to collide with (with a
+// pit gap left open), and a start/finish line across the track. `bbox` is a
+// broad-phase gate so movers only test the walls when they're near the circuit.
 export interface Track {
-  pavement: Rect[];
-  start: Rect;
+  outer: Vec2[];
+  inner: Vec2[];
+  walls: Seg[];
+  wallHalf: number;
+  start: Seg;
+  bbox: Rect;
 }
 
 // A neutral city-dweller: wanders until something dangerous is near, then bolts
@@ -355,6 +366,103 @@ function makePickup(pos: Vec2, weapon: Weapon): Pickup {
   return { pos: { x: pos.x, y: pos.y }, weapon, radius: 22, bob: Math.random() * Math.PI * 2 };
 }
 
+// Sample a smooth closed Catmull-Rom spline through the control points.
+function sampleClosedSpline(pts: Vec2[], perSeg: number): Vec2[] {
+  const n = pts.length;
+  const out: Vec2[] = [];
+  for (let i = 0; i < n; i++) {
+    const p0 = pts[(i - 1 + n) % n];
+    const p1 = pts[i];
+    const p2 = pts[(i + 1) % n];
+    const p3 = pts[(i + 2) % n];
+    for (let s = 0; s < perSeg; s++) {
+      const t = s / perSeg;
+      const t2 = t * t;
+      const t3 = t2 * t;
+      out.push({
+        x: 0.5 * (2 * p1.x + (-p0.x + p2.x) * t + (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 + (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t3),
+        y: 0.5 * (2 * p1.y + (-p0.y + p2.y) * t + (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 + (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3),
+      });
+    }
+  }
+  return out;
+}
+
+// Offset a closed centreline to its outer + inner boundary loops. Outward is
+// decided per-point against the loop centroid, which is robust for the gentle
+// convex-ish shapes used here.
+function offsetLoops(center: Vec2[], half: number): { outer: Vec2[]; inner: Vec2[] } {
+  const n = center.length;
+  let cx = 0;
+  let cy = 0;
+  for (const p of center) {
+    cx += p.x;
+    cy += p.y;
+  }
+  cx /= n;
+  cy /= n;
+  const outer: Vec2[] = [];
+  const inner: Vec2[] = [];
+  for (let i = 0; i < n; i++) {
+    const prev = center[(i - 1 + n) % n];
+    const next = center[(i + 1) % n];
+    const tan = norm({ x: next.x - prev.x, y: next.y - prev.y });
+    let nx = -tan.y;
+    let ny = tan.x;
+    if ((center[i].x - cx) * nx + (center[i].y - cy) * ny < 0) {
+      nx = -nx;
+      ny = -ny;
+    }
+    outer.push({ x: center[i].x + nx * half, y: center[i].y + ny * half });
+    inner.push({ x: center[i].x - nx * half, y: center[i].y - ny * half });
+  }
+  return { outer, inner };
+}
+
+// Build the racing circuit: a big smooth loop (fat on the left, tapering to a
+// tail on the right, with a gentle top wave) roughly tracing the reference
+// sketch. Returns the track plus where to spawn the player (just outside the pit)
+// and where to sit the race car (on the start line).
+function buildCircuit(): { track: Track; spawn: Vec2; car: { pos: Vec2; angle: number } } {
+  const control: Vec2[] = [
+    v(280, 3350), v(400, 2720), v(820, 2500), v(1250, 2760), v(1700, 2620),
+    v(2080, 2980), v(2280, 3350), v(2080, 3720), v(1550, 3980), v(950, 4080), v(480, 3900),
+  ];
+  const center = sampleClosedSpline(control, 12);
+  const N = center.length;
+  const half = 155; // track half-width
+  const wallHalf = 16;
+  const { outer, inner } = offsetLoops(center, half);
+  // pit gap centred on the rightmost point, so it faces the open spawn corridor
+  let gi = 0;
+  for (let i = 1; i < N; i++) if (center[i].x > center[gi].x) gi = i;
+  const gapSpan = 4;
+  const walls: Seg[] = [];
+  for (let i = 0; i < N; i++) {
+    const j = (i + 1) % N;
+    const dist = Math.min((i - gi + N) % N, (gi - i + N) % N);
+    if (dist > gapSpan) walls.push({ a: outer[i], b: outer[j] }); // outer ring minus the gap
+    walls.push({ a: inner[i], b: inner[j] }); // infield fully enclosed
+  }
+  const start: Seg = { a: { x: inner[gi].x, y: inner[gi].y }, b: { x: outer[gi].x, y: outer[gi].y } };
+  let minx = Infinity;
+  let miny = Infinity;
+  let maxx = -Infinity;
+  let maxy = -Infinity;
+  for (const p of outer) {
+    minx = Math.min(minx, p.x);
+    miny = Math.min(miny, p.y);
+    maxx = Math.max(maxx, p.x);
+    maxy = Math.max(maxy, p.y);
+  }
+  const bbox: Rect = { x: minx, y: miny, w: maxx - minx, h: maxy - miny };
+  const outward = norm(sub(outer[gi], center[gi]));
+  const tan = norm(sub(center[(gi + 1) % N], center[gi]));
+  const spawn = v(center[gi].x + outward.x * (half + 150), center[gi].y + outward.y * (half + 150));
+  const car = { pos: v(center[gi].x, center[gi].y), angle: Math.atan2(tan.y, tan.x) };
+  return { track: { outer, inner, walls, wallHalf, start, bbox }, spawn, car };
+}
+
 // A four-district sandbox map:
 //   top-left     — a walled battle arena packed with hostiles (combat testing),
 //   top-right    — a city grid with roads, parked cars and fleeing civilians,
@@ -412,7 +520,7 @@ export function buildWorld(loadout: Loadout): World {
     'taxi', 'police', 'ambulance', 'bus', 'boxtruck', 'mediumtruck',
   ];
   const palette = ['#c94f4f', '#4f7dc9', '#d8c14a', '#5bb573', '#9b6fc9', '#d68a3c', '#4fb0c9', '#b5b55b', '#cfcfd6', '#3a3a42'];
-  const lotCols = [2720, 3060, 3400, 3740, 4080, 4420];
+  const lotCols = [2800, 3140, 3480, 3820, 4160, 4500];
   const lotRows = [2760, 3140, 3520, 3900];
   let fi = 0;
   for (const ry of lotRows)
@@ -423,33 +531,19 @@ export function buildWorld(loadout: Loadout): World {
     }
   // a rack with one of every weapon, laid out in a row along the top of the lot
   const rack: Weapon[] = [PISTOL, RIFLE, SHOTGUN, SNIPER, KNIFE];
-  const pickups: Pickup[] = rack.map((wpn, i) => makePickup(v(2680 + i * 210, 2520), wpn));
+  const pickups: Pickup[] = rack.map((wpn, i) => makePickup(v(2760 + i * 210, 2520), wpn));
   // target dummies at the far side for weapon testing
   enemySpots.push([4600, 2900, 'gunman'], [4600, 3300, 'brute'], [4300, 3720, 'smg'], [4650, 3720, 'marksman']);
 
-  // ---------- Racing circuit (bottom-left) ----------
-  const RW = 32;
-  barriers.push(
-    { x: 200, y: 2450, w: 1880, h: RW }, // top
-    { x: 200, y: 2450, w: RW, h: 1780 }, // left
-    { x: 2048, y: 2450, w: RW, h: 1780 }, // right
-    { x: 200, y: 4198, w: 760, h: RW }, // bottom-left (pit gap x960..1320)
-    { x: 1320, y: 4198, w: 760, h: RW }, // bottom-right
-  );
-  buildings.push(
-    { x: 520, y: 2760, w: 760, h: 1180 }, // L-shaped infield: main column
-    { x: 1280, y: 2760, w: 480, h: 520 }, // L-shaped infield: top arm
-  );
-  const track: Track = {
-    pavement: [{ x: 200, y: 2450, w: 1880, h: 1780 }],
-    start: { x: 640, y: 3944, w: 26, h: 254 },
-  };
-  cars.push(makeCar(v(820, 4066), Math.PI, '#c94f4f', 'sport')); // race car on the start line
+  // ---------- Racing circuit (bottom-left) — a big smooth spline ribbon ----------
+  const circuit = buildCircuit();
+  const track = circuit.track;
+  cars.push(makeCar(circuit.car.pos, circuit.car.angle, '#c94f4f', 'sport')); // race car on the start line
 
-  // ---------- Spawn (bottom-centre) ----------
-  const spawn = v(2340, 4090);
+  // ---------- Spawn (just outside the circuit's pit) ----------
+  const spawn = circuit.spawn;
   const player = makePlayer({ x: spawn.x, y: spawn.y }, loadout);
-  cars.push(makeCar(v(2440, 3820), 0, '#5bb573', 'coupe')); // a ride waiting by the spawn
+  cars.push(makeCar(v(spawn.x + 70, spawn.y + 190), 0, '#5bb573', 'coupe')); // a ride waiting by the spawn
 
   // Safety net: never place a hostile near the spawn.
   const enemies = enemySpots

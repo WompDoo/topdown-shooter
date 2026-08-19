@@ -2,7 +2,7 @@
 // their car); full visibility, no fog. Draws city, cars, hostiles, gunfire juice,
 // HUD, and a minimap. Never mutates the world.
 
-import type { Car, Enemy, EnemyType, World } from './world';
+import type { Car, Enemy, EnemyType, Seg, World } from './world';
 import type { Input } from './input';
 import type { Weapon } from './weapon';
 import { fromAngle, randSpread } from './math';
@@ -105,24 +105,54 @@ function drawGround(ctx: CanvasRenderingContext2D, w: World): void {
 function drawTrack(ctx: CanvasRenderingContext2D, w: World): void {
   const t = w.track;
   if (!t) return;
-  // paved surface (one or more cells)
-  for (const pv of t.pavement) {
-    ctx.fillStyle = COL.track;
-    ctx.fillRect(pv.x, pv.y, pv.w, pv.h);
-    ctx.strokeStyle = COL.kerb;
-    ctx.lineWidth = 3;
-    ctx.strokeRect(pv.x + 1.5, pv.y + 1.5, pv.w - 3, pv.h - 3);
-  }
-  // start/finish line: a checkered strip
+  // paved ribbon: fill the outer loop, punch out the inner hole (even-odd)
+  ctx.beginPath();
+  ctx.moveTo(t.outer[0].x, t.outer[0].y);
+  for (let i = 1; i < t.outer.length; i++) ctx.lineTo(t.outer[i].x, t.outer[i].y);
+  ctx.closePath();
+  ctx.moveTo(t.inner[0].x, t.inner[0].y);
+  for (let i = 1; i < t.inner.length; i++) ctx.lineTo(t.inner[i].x, t.inner[i].y);
+  ctx.closePath();
+  ctx.fillStyle = COL.track;
+  ctx.fill('evenodd');
+
+  // guardrails: a dark edge then a light rail, stroked per segment so the round
+  // caps bridge them into a smooth curve and the pit gap stays open.
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = COL.buildEdge;
+  ctx.lineWidth = t.wallHalf * 2 + 4;
+  strokeSegs(ctx, t.walls);
+  ctx.strokeStyle = COL.barrier;
+  ctx.lineWidth = t.wallHalf * 2 - 2;
+  strokeSegs(ctx, t.walls);
+  ctx.lineCap = 'butt';
+  ctx.lineJoin = 'miter';
+
+  // start/finish: a white band with black dashes across the track = a chequer
   const s = t.start;
-  const cell = s.w / 2;
-  for (let yy = 0; yy < s.h; yy += cell) {
-    for (let xx = 0; xx < s.w; xx += cell) {
-      const on = (Math.round(xx / cell) + Math.round(yy / cell)) % 2 === 0;
-      ctx.fillStyle = on ? '#e8edf2' : '#12151b';
-      ctx.fillRect(s.x + xx, s.y + yy, cell, Math.min(cell, s.h - yy));
-    }
+  ctx.lineWidth = 30;
+  ctx.strokeStyle = '#e8edf2';
+  ctx.beginPath();
+  ctx.moveTo(s.a.x, s.a.y);
+  ctx.lineTo(s.b.x, s.b.y);
+  ctx.stroke();
+  ctx.strokeStyle = '#12151b';
+  ctx.setLineDash([14, 14]);
+  ctx.beginPath();
+  ctx.moveTo(s.a.x, s.a.y);
+  ctx.lineTo(s.b.x, s.b.y);
+  ctx.stroke();
+  ctx.setLineDash([]);
+}
+
+function strokeSegs(ctx: CanvasRenderingContext2D, segs: Seg[]): void {
+  ctx.beginPath();
+  for (const s of segs) {
+    ctx.moveTo(s.a.x, s.a.y);
+    ctx.lineTo(s.b.x, s.b.y);
   }
+  ctx.stroke();
 }
 
 function drawSkids(ctx: CanvasRenderingContext2D, w: World): void {
@@ -530,6 +560,16 @@ function drawMinimap(ctx: CanvasRenderingContext2D, w: World, cssW: number): voi
   for (const b of w.buildings) ctx.fillRect(mx + b.x * s, my + b.y * s, b.w * s, b.h * s);
   ctx.fillStyle = 'rgba(180,120,110,0.9)';
   for (const b of w.barriers) ctx.fillRect(mx + b.x * s, my + b.y * s, Math.max(1, b.w * s), Math.max(1, b.h * s));
+  if (w.track) {
+    ctx.strokeStyle = 'rgba(180,120,110,0.8)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    const o = w.track.outer;
+    ctx.moveTo(mx + o[0].x * s, my + o[0].y * s);
+    for (let i = 1; i < o.length; i++) ctx.lineTo(mx + o[i].x * s, my + o[i].y * s);
+    ctx.closePath();
+    ctx.stroke();
+  }
   ctx.fillStyle = '#5a86c9';
   for (const c of w.cars) ctx.fillRect(mx + c.pos.x * s - 2, my + c.pos.y * s - 2, 4, 4);
   ctx.fillStyle = '#cfe0f0';

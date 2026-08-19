@@ -7,7 +7,7 @@ import type { Player, World } from './world';
 import type { Vec2 } from './math';
 import type { Weapon } from './weapon';
 import { enterCar } from './car';
-import { add, angleOf, approach, clamp, fromAngle, len, randSpread, resolveCircleRect, scale, sub } from './math';
+import { add, angleOf, approach, clamp, collideCircleSegment, fromAngle, len, randSpread, resolveCircleRect, scale, sub } from './math';
 import { fireInterval } from './weapon';
 import { barrelDist } from './weaponart';
 import { meleeHit, resolveShot } from './combat';
@@ -21,6 +21,16 @@ const DIVE_DRAG = 3.2; // ground friction while tumbling out of a car
 // Push the player out of walls and cars, then clamp to the world.
 function resolveFoot(w: World, p: Player): void {
   for (const b of w.solids) resolveCircleRect(p.pos, p.radius, b);
+  const t = w.track;
+  if (
+    t &&
+    p.pos.x > t.bbox.x - 40 &&
+    p.pos.x < t.bbox.x + t.bbox.w + 40 &&
+    p.pos.y > t.bbox.y - 40 &&
+    p.pos.y < t.bbox.y + t.bbox.h + 40
+  ) {
+    for (const s of t.walls) collideCircleSegment(p.pos, p.radius, s.a, s.b, t.wallHalf);
+  }
   for (const c of w.cars) {
     const dx = p.pos.x - c.pos.x;
     const dy = p.pos.y - c.pos.y;

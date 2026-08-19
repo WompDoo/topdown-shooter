@@ -146,3 +146,30 @@ export function collideCircleRect(p: Vec2, radius: number, r: Rect): Vec2 | null
 export function resolveCircleRect(p: Vec2, radius: number, r: Rect): boolean {
   return collideCircleRect(p, radius, r) !== null;
 }
+
+// Push a circle out of a thick line segment (a capsule: segment a-b with radius
+// `half`), returning the outward unit normal (surface -> circle) or null if there
+// was no overlap. Mutates `p`. Used for curved guardrails built from segments.
+export function collideCircleSegment(p: Vec2, radius: number, a: Vec2, b: Vec2, half: number): Vec2 | null {
+  const abx = b.x - a.x;
+  const aby = b.y - a.y;
+  const t = clamp(((p.x - a.x) * abx + (p.y - a.y) * aby) / (abx * abx + aby * aby || 1), 0, 1);
+  const cx = a.x + abx * t;
+  const cy = a.y + aby * t;
+  let dx = p.x - cx;
+  let dy = p.y - cy;
+  let d = Math.hypot(dx, dy);
+  const min = radius + half;
+  if (d >= min) return null;
+  if (d < 1e-6) {
+    // Centre exactly on the segment: push out along its perpendicular.
+    dx = -aby;
+    dy = abx;
+    d = Math.hypot(dx, dy) || 1;
+  }
+  const nx = dx / d;
+  const ny = dy / d;
+  p.x = cx + nx * min;
+  p.y = cy + ny * min;
+  return { x: nx, y: ny };
+}

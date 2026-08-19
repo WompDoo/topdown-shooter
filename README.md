@@ -33,9 +33,10 @@ Other scripts: `npm run build` (production bundle to `dist/`), `npm run preview`
 
 - **Four-district sandbox:** a walled **battle arena** (top-left) for combat
   testing, a **city** grid with roads (top-right), a **testing lot** with one of
-  every vehicle and a rack of weapon pickups (bottom-right), and a **racing
-  circuit** with guardrails, an infield and a start line (bottom-left). You spawn
-  in the open middle. Full visibility, camera follows you, minimap.
+  every vehicle and a rack of weapon pickups (bottom-right), and a big curved
+  **racing circuit** — a smooth spline ribbon with guardrails, a pit gap and a
+  start line (bottom-left). You spawn by the pit. Full visibility, camera follows
+  you, minimap.
 - **Weapon pickups:** every gun (and the knife) sits on a pad in the testing lot;
   walk over one to equip it.
 - **Kinetic gunplay:** hitscan with recoil bloom, muzzle flash, tracers, casing
