@@ -3,8 +3,9 @@
 
 import { createInput } from './input';
 import { buildWorld, DEFAULT_LOADOUT } from './world';
-import { updatePlayer } from './player';
+import { equipWeapon, updatePlayer } from './player';
 import { updateEnemies } from './enemy';
+import { updateCivilians } from './civilian';
 import { updateFx } from './fx';
 import {
   AUTO_PATH_RANGE,
@@ -97,6 +98,17 @@ function fixedUpdate(dt: number): void {
       p.pos.y = w.cars[p.inCar].pos.y;
     }
     updateEnemies(w, dt);
+    updateCivilians(w, dt);
+    // Weapon pickups: walk over one to equip it (swaps the active slot).
+    if (p.inCar < 0 && !p.downed && p.dive <= 0) {
+      for (const pk of w.pickups) {
+        if (p.weapon.name === pk.weapon.name) continue;
+        if (Math.hypot(pk.pos.x - p.pos.x, pk.pos.y - p.pos.y) < p.radius + pk.radius) {
+          equipWeapon(p, pk.weapon);
+          break;
+        }
+      }
+    }
   } else if (input.pressed('KeyR')) {
     world = buildWorld(DEFAULT_LOADOUT);
     cam.x = world.player.pos.x;

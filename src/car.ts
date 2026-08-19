@@ -208,6 +208,24 @@ function carRunOver(w: World, car: Car): void {
       addHitstop(w, 0.05);
     }
   }
+  for (const c of w.civilians) {
+    if (!c.alive) continue;
+    if (Math.hypot(c.pos.x - car.pos.x, c.pos.y - car.pos.y) > car.radius + c.radius) continue;
+    c.hp -= 400;
+    c.panic = Math.max(c.panic, 3);
+    c.fleeFrom = { x: car.pos.x, y: car.pos.y };
+    c.vel.x += car.vel.x * 0.8;
+    c.vel.y += car.vel.y * 0.8;
+    spawnBlood(w, c.pos, car.angle, 16);
+    addShake(w, 5);
+    addGore(car, c.pos);
+    car.bloodyTires = BLOODY_TIRE_TIME;
+    if (c.hp <= 0 && c.alive) {
+      c.alive = false;
+      spawnDeath(w, c.pos, car.angle);
+      sfxEnemyDeath();
+    }
+  }
 }
 
 // Stamp a blood splat onto the car where the body hit them, kept in the car's
@@ -260,6 +278,18 @@ function destroyCar(w: World, car: Car): void {
     if (e.hp <= 0) {
       e.alive = false;
       spawnDeath(w, e.pos, car.angle);
+      sfxEnemyDeath();
+    }
+  }
+  for (const c of w.civilians) {
+    if (!c.alive) continue;
+    if (Math.hypot(c.pos.x - car.pos.x, c.pos.y - car.pos.y) > r + c.radius) continue;
+    c.hp -= EXPLOSION_ENEMY_DMG;
+    c.panic = Math.max(c.panic, 3);
+    c.fleeFrom = { x: car.pos.x, y: car.pos.y };
+    if (c.hp <= 0 && c.alive) {
+      c.alive = false;
+      spawnDeath(w, c.pos, car.angle);
       sfxEnemyDeath();
     }
   }

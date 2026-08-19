@@ -67,11 +67,13 @@ export function render(
   drawDecals(ctx, w);
   drawBuildings(ctx, w);
   drawBarriers(ctx, w);
+  drawPickups(ctx, w);
   for (const c of w.cars) drawCar(ctx, c);
   for (const e of w.enemies) {
     if (e.alive) drawEnemy(ctx, e);
     else drawCorpse(ctx, e);
   }
+  drawCivilians(ctx, w);
   if (w.player.inCar < 0) drawPlayer(ctx, w);
   drawSlashes(ctx, w);
   drawTracers(ctx, w);
@@ -103,12 +105,14 @@ function drawGround(ctx: CanvasRenderingContext2D, w: World): void {
 function drawTrack(ctx: CanvasRenderingContext2D, w: World): void {
   const t = w.track;
   if (!t) return;
-  // paved area
-  ctx.fillStyle = COL.track;
-  ctx.fillRect(t.area.x, t.area.y, t.area.w, t.area.h);
-  ctx.strokeStyle = COL.kerb;
-  ctx.lineWidth = 3;
-  ctx.strokeRect(t.area.x + 1.5, t.area.y + 1.5, t.area.w - 3, t.area.h - 3);
+  // paved surface (one or more cells)
+  for (const pv of t.pavement) {
+    ctx.fillStyle = COL.track;
+    ctx.fillRect(pv.x, pv.y, pv.w, pv.h);
+    ctx.strokeStyle = COL.kerb;
+    ctx.lineWidth = 3;
+    ctx.strokeRect(pv.x + 1.5, pv.y + 1.5, pv.w - 3, pv.h - 3);
+  }
   // start/finish line: a checkered strip
   const s = t.start;
   const cell = s.w / 2;
@@ -251,6 +255,64 @@ function drawCorpse(ctx: CanvasRenderingContext2D, e: Enemy): void {
   ctx.beginPath();
   ctx.arc(e.pos.x, e.pos.y, e.radius * 1.05, 0, Math.PI * 2);
   ctx.fill();
+}
+
+function drawCivilians(ctx: CanvasRenderingContext2D, w: World): void {
+  for (const c of w.civilians) {
+    if (!c.alive) {
+      ctx.fillStyle = 'rgba(64,42,36,0.6)';
+      ctx.beginPath();
+      ctx.arc(c.pos.x, c.pos.y, c.radius, 0, Math.PI * 2);
+      ctx.fill();
+      continue;
+    }
+    const dir = fromAngle(c.aim);
+    ctx.fillStyle = c.color;
+    ctx.beginPath();
+    ctx.arc(c.pos.x, c.pos.y, c.radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,0.35)';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(c.pos.x, c.pos.y);
+    ctx.lineTo(c.pos.x + dir.x * (c.radius + 3), c.pos.y + dir.y * (c.radius + 3));
+    ctx.stroke();
+    if (c.panic > 0) {
+      // a little alarm marker bobbing over the head
+      ctx.fillStyle = 'rgba(255,224,90,0.95)';
+      ctx.fillRect(c.pos.x - 1.5, c.pos.y - c.radius - 13, 3, 7);
+      ctx.fillRect(c.pos.x - 1.5, c.pos.y - c.radius - 4, 3, 3);
+    }
+    if (c.flash > 0) {
+      ctx.fillStyle = `rgba(255,255,255,${(c.flash / 0.09) * 0.8})`;
+      ctx.beginPath();
+      ctx.arc(c.pos.x, c.pos.y, c.radius, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+}
+
+function drawPickups(ctx: CanvasRenderingContext2D, w: World): void {
+  const sheet = weaponSheet();
+  ctx.imageSmoothingEnabled = false;
+  for (const pk of w.pickups) {
+    // a soft teal pad so the item reads as something to grab
+    ctx.fillStyle = 'rgba(87,214,191,0.14)';
+    ctx.beginPath();
+    ctx.arc(pk.pos.x, pk.pos.y, pk.radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(127,227,255,0.5)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    const art = weaponArt(pk.weapon);
+    if (sheet && art) {
+      const bob = Math.sin(w.time * 3 + pk.bob) * 3;
+      const wd = art.sw * WEAPON_SCALE * 1.1;
+      const ht = art.sh * WEAPON_SCALE * 1.1;
+      ctx.drawImage(sheet, art.sx, art.sy, art.sw, art.sh, pk.pos.x - wd / 2, pk.pos.y - ht / 2 + bob, wd, ht);
+    }
+  }
+  ctx.imageSmoothingEnabled = true;
 }
 
 // Draw a held weapon sprite: grip near the hand, barrel forward along `aim`,
@@ -470,6 +532,11 @@ function drawMinimap(ctx: CanvasRenderingContext2D, w: World, cssW: number): voi
   for (const b of w.barriers) ctx.fillRect(mx + b.x * s, my + b.y * s, Math.max(1, b.w * s), Math.max(1, b.h * s));
   ctx.fillStyle = '#5a86c9';
   for (const c of w.cars) ctx.fillRect(mx + c.pos.x * s - 2, my + c.pos.y * s - 2, 4, 4);
+  ctx.fillStyle = '#cfe0f0';
+  for (const c of w.civilians) {
+    if (!c.alive) continue;
+    ctx.fillRect(mx + c.pos.x * s - 1, my + c.pos.y * s - 1, 2, 2);
+  }
   ctx.fillStyle = '#e0533a';
   for (const e of w.enemies) {
     if (!e.alive) continue;

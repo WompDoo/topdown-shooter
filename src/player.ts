@@ -5,6 +5,7 @@
 import type { Input } from './input';
 import type { Player, World } from './world';
 import type { Vec2 } from './math';
+import type { Weapon } from './weapon';
 import { enterCar } from './car';
 import { add, angleOf, approach, clamp, fromAngle, len, randSpread, resolveCircleRect, scale, sub } from './math';
 import { fireInterval } from './weapon';
@@ -63,6 +64,18 @@ export function swapWeapon(p: Player, next: number): void {
   p.reloadTimer = 0;
   p.fireTimer = Math.max(p.fireTimer, 0.12);
   p.spread = p.weapon.spreadMin;
+}
+
+// Equip a weapon grabbed off the ground into the active slot, topped up.
+export function equipWeapon(p: Player, weapon: Weapon): void {
+  p.slots[p.slot] = weapon;
+  p.weapon = weapon;
+  p.slotAmmo[p.slot] = weapon.mag;
+  p.ammo = weapon.mag;
+  p.reloading = false;
+  p.reloadTimer = 0;
+  p.fireTimer = Math.max(p.fireTimer, 0.12);
+  p.spread = weapon.spreadMin;
 }
 
 function startReload(p: Player): void {

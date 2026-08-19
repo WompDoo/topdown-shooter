@@ -2,7 +2,7 @@
 // instant ray that stops at the nearest building, car, or body. Getting shot (or
 // a round snapping past) makes nearby hostiles turn on the player.
 
-import type { Car, Enemy, World } from './world';
+import type { Car, Civilian, Enemy, World } from './world';
 import type { Vec2 } from './math';
 import { add, angleDiff, angleOf, clamp, fromAngle, len, rayVsCircle, rayVsRect, scale, sub } from './math';
 import { addHitstop, addShake, spawnBlood, spawnDeath, spawnSparks, spawnTracer } from './fx';
@@ -36,6 +36,16 @@ function aggroAlong(w: World, a: Vec2, b: Vec2): void {
   }
 }
 
+// A round cracking past sends any civilian near its path bolting from the shooter.
+function scareCivilians(w: World, a: Vec2, b: Vec2): void {
+  for (const c of w.civilians) {
+    if (c.alive && segDist(c.pos, a, b) < 150) {
+      c.panic = Math.max(c.panic, 2.6);
+      c.fleeFrom = { x: a.x, y: a.y };
+    }
+  }
+}
+
 export function resolveShot(
   w: World,
   origin: Vec2,
@@ -48,6 +58,7 @@ export function resolveShot(
   const dir = fromAngle(angle);
   let best = range;
   let hitEnemy: Enemy | null = null;
+  let hitCiv: Civilian | null = null;
   let hitCar: Car | null = null;
   let hitPlayer = false;
   let hitSolid = false;
@@ -97,6 +108,20 @@ export function resolveShot(
     }
   }
 
+  // Civilians are neutral flesh — either side's rounds can catch them.
+  for (const c of w.civilians) {
+    if (!c.alive) continue;
+    const t = rayVsCircle(origin, dir, best, c.pos, c.radius);
+    if (t < best) {
+      best = t;
+      hitCiv = c;
+      hitEnemy = null;
+      hitCar = null;
+      hitPlayer = false;
+      hitSolid = false;
+    }
+  }
+
   const end = add(origin, scale(dir, best));
   spawnTracer(w, origin, end, team);
 
@@ -134,12 +159,27 @@ export function resolveShot(
     damageCar(w, hitCar, dmg * bulletDamageMultiplier(hitCar, end));
     spawnSparks(w, end, angle, 5);
     sfxImpactWall();
+  } else if (hitCiv) {
+    hitCiv.hp -= dmg;
+    hitCiv.flash = 0.09;
+    hitCiv.panic = Math.max(hitCiv.panic, 3);
+    hitCiv.fleeFrom = { x: origin.x, y: origin.y };
+    hitCiv.vel = add(hitCiv.vel, scale(dir, knockback));
+    spawnBlood(w, end, angle, 8);
+    sfxImpactFlesh();
+    if (hitCiv.hp <= 0 && hitCiv.alive) {
+      hitCiv.alive = false;
+      spawnDeath(w, hitCiv.pos, angle);
+      sfxEnemyDeath();
+      addHitstop(w, 0.03);
+    }
   } else if (hitSolid) {
     spawnSparks(w, end, angle, 7);
     sfxImpactWall();
   }
 
   if (team === 'player') aggroAlong(w, origin, end);
+  scareCivilians(w, origin, end);
 }
 
 // Knife swing: hit every hostile inside the arc + reach in front.

@@ -11,8 +11,11 @@ import {
   ENEMY_SHOTGUN,
   ENEMY_SMG,
   ENEMY_SNIPER,
+  KNIFE,
   PISTOL,
   RIFLE,
+  SHOTGUN,
+  SNIPER,
 } from './weapon';
 
 export type Team = 'player' | 'enemy';
@@ -162,11 +165,39 @@ export interface Skid {
   blood?: boolean; // red tyre track laid down just after a run-over
 }
 
-// A test racetrack: a paved area with a start/finish line. Its guardrails live
-// in world.barriers; the infield is a normal barrier block.
+// A racing circuit: paved cells (the driveable surface) with a start/finish
+// line. Its guardrails live in world.barriers; the infield is a building block.
 export interface Track {
-  area: Rect;
+  pavement: Rect[];
   start: Rect;
+}
+
+// A neutral city-dweller: wanders until something dangerous is near, then bolts
+// away from it. Never fights; can still be caught in the crossfire.
+export interface Civilian {
+  pos: Vec2;
+  vel: Vec2;
+  radius: number;
+  aim: number; // travel / facing direction
+  hp: number;
+  maxHp: number;
+  alive: boolean;
+  color: string; // clothing tint
+  panic: number; // >0 = fleeing (seconds left)
+  fleeFrom: Vec2; // point to sprint away from while panicking
+  wanderTimer: number;
+  wanderTarget: Vec2;
+  home: Vec2;
+  speed: number;
+  flash: number;
+}
+
+// A weapon lying on the ground; walk over it to equip that weapon.
+export interface Pickup {
+  pos: Vec2;
+  weapon: Weapon;
+  radius: number;
+  bob: number; // phase for the idle float animation
 }
 
 export interface World {
@@ -176,7 +207,9 @@ export interface World {
   solids: Rect[]; // buildings + barriers — everything that collides / blocks bullets
   player: Player;
   enemies: Enemy[];
+  civilians: Civilian[];
   cars: Car[];
+  pickups: Pickup[];
   tracers: Tracer[];
   particles: Particle[];
   muzzles: Muzzle[];
@@ -296,92 +329,133 @@ function makeCar(pos: Vec2, angle: number, color: string, kind: VehicleKind = 's
   };
 }
 
-// A handcrafted city: a 7x5 grid of building blocks with roads between them.
-// The bottom-left corner is cleared for a small oval racetrack where you spawn
-// (a car on the start line); hostiles are scattered across the rest of the city,
-// all kept well clear of the spawn. Cars parked on the roads. No fog / stealth.
+const CIVILIAN_COLORS = ['#5b7fa6', '#a6795b', '#6fa65b', '#a65b8f', '#c9c07a', '#7a8a99', '#b0684f', '#4f9b8f'];
+
+function makeCivilian(pos: Vec2, color: string): Civilian {
+  return {
+    pos: { x: pos.x, y: pos.y },
+    vel: v(),
+    radius: 11,
+    aim: Math.random() * Math.PI * 2,
+    hp: 30,
+    maxHp: 30,
+    alive: true,
+    color,
+    panic: 0,
+    fleeFrom: { x: pos.x, y: pos.y },
+    wanderTimer: 0,
+    wanderTarget: { x: pos.x, y: pos.y },
+    home: { x: pos.x, y: pos.y },
+    speed: 98,
+    flash: 0,
+  };
+}
+
+function makePickup(pos: Vec2, weapon: Weapon): Pickup {
+  return { pos: { x: pos.x, y: pos.y }, weapon, radius: 22, bob: Math.random() * Math.PI * 2 };
+}
+
+// A four-district sandbox map:
+//   top-left     — a walled battle arena packed with hostiles (combat testing),
+//   top-right    — a city grid with roads, parked cars and fleeing civilians,
+//   bottom-right — a testing lot: one of every vehicle + a rack of weapon pickups,
+//   bottom-left  — a racing circuit (guardrails, infield, start line, race car).
+// The player spawns in the open bottom-centre between them. No fog / stealth.
 export function buildWorld(loadout: Loadout): World {
-  const bounds: Rect = { x: 0, y: 0, w: 4200, h: 3000 };
-  const buildings: Rect[] = [];
-  const bw = 380;
-  const bh = 380;
-  // Columns/rows step 560 (a 380 block + a 180 road gap).
-  const cols = [140, 700, 1260, 1820, 2380, 2940, 3500];
-  const rows = [140, 700, 1260, 1820, 2380];
-  // Cleared cells, keyed "col,row": the bottom-left 3x2 (racetrack) + a central
-  // plaza. Everything else is a city block.
-  const cleared = new Set(['0,3', '1,3', '2,3', '0,4', '1,4', '2,4', '3,2']);
-  for (let cx = 0; cx < cols.length; cx++) {
-    for (let cy = 0; cy < rows.length; cy++) {
-      if (cleared.has(`${cx},${cy}`)) continue;
-      buildings.push({ x: cols[cx], y: rows[cy], w: bw, h: bh });
-    }
-  }
+  const bounds: Rect = { x: 0, y: 0, w: 5000, h: 4400 };
+  const buildings: Rect[] = []; // gray blocks: city, arena cover, infield
+  const barriers: Rect[] = []; // striped walls: arena perimeter, guardrails
+  const cars: Car[] = [];
+  const enemySpots: [number, number, EnemyType][] = [];
+  const civSpots: Vec2[] = [];
 
-  // --- Racetrack (a bounded oval in the cleared bottom-left corner) ---
-  const track: Track = { area: { x: 200, y: 1860, w: 1360, h: 840 }, start: { x: 410, y: 2436, w: 26, h: 228 } };
-  const barriers: Rect[] = [
-    // outer ring (thin guardrails), with a pit gap in the bottom straight
-    { x: 220, y: 1880, w: 1340, h: 36 }, // top
-    { x: 220, y: 1880, w: 36, h: 820 }, // left
-    { x: 1524, y: 1880, w: 36, h: 820 }, // right
-    { x: 220, y: 2664, w: 560, h: 36 }, // bottom-left (gap x780..1000)
-    { x: 1000, y: 2664, w: 560, h: 36 }, // bottom-right
-    // infield island
-    { x: 660, y: 2150, w: 460, h: 280 },
-  ];
+  // ---------- Battle arena (top-left) ----------
+  const AW = 34;
+  barriers.push(
+    { x: 160, y: 160, w: 1880, h: AW }, // top
+    { x: 160, y: 160, w: AW, h: 1620 }, // left
+    { x: 2006, y: 160, w: AW, h: 1620 }, // right
+    { x: 160, y: 1746, w: 760, h: AW }, // bottom-left (entrance gap x920..1280)
+    { x: 1280, y: 1746, w: 760, h: AW }, // bottom-right
+  );
+  buildings.push(
+    { x: 520, y: 640, w: 200, h: 70 }, // cover blocks to break sight-lines
+    { x: 1300, y: 560, w: 70, h: 240 },
+    { x: 820, y: 1090, w: 260, h: 70 },
+    { x: 1520, y: 1150, w: 70, h: 260 },
+  );
+  enemySpots.push(
+    [520, 380, 'gunman'], [900, 360, 'smg'], [1320, 360, 'brute'], [1720, 420, 'marksman'],
+    [700, 920, 'gunman'], [1520, 780, 'smg'], [1080, 1320, 'brute'], [1760, 1320, 'gunman'],
+  );
 
-  // Spawn on the bottom straight, on the start line, with a race car alongside.
-  const spawn = v(474, 2550);
-  const player = makePlayer({ x: spawn.x, y: spawn.y }, loadout);
+  // ---------- City (top-right) ----------
+  const cbw = 360;
+  const cityCols = [2520, 3080, 3640, 4200];
+  const cityRows = [220, 780, 1340];
+  const plaza = '3080,780'; // one cleared block, a little square
+  for (const cx of cityCols)
+    for (const cy of cityRows)
+      if (`${cx},${cy}` !== plaza) buildings.push({ x: cx, y: cy, w: cbw, h: cbw });
+  // road-intersection coords (always clear of blocks) for the crowd + traffic
+  const gapX = [2980, 3540, 4100, 4680];
+  const gapY = [680, 1240, 1900];
+  for (const gx of gapX) for (const gy of gapY) civSpots.push(v(gx, gy));
+  civSpots.push(v(3260, 900), v(3320, 1000), v(3180, 1050), v(3380, 860)); // loiterers in the plaza
+  cars.push(makeCar(v(2980, 680), 0, '#d8c14a', 'taxi'), makeCar(v(4100, 1240), Math.PI / 2, '#4f7dc9', 'sedan'));
+  enemySpots.push([3560, 700, 'smg'], [4680, 1260, 'gunman'], [3520, 1920, 'brute']);
 
-  // One of every vehicle type, parked at road intersections (the crossings of
-  // the vertical/horizontal road gaps, so all are clear of buildings). The two
-  // intersections that fall inside the racetrack are skipped. The race car on
-  // the start line is a sedan; the rest cycle through the remaining 22 kinds.
-  const roadX = [610, 1170, 1730, 2290, 2850, 3410];
-  const roadY = [610, 1170, 1730, 2290];
-  const inTrack = new Set(['610,2290', '1170,2290']);
+  // ---------- Testing lot (bottom-right) ----------
   const fleet: VehicleKind[] = [
-    'coupe', 'hatchback', 'musclecar', 'sport', 'supercar', 'luxury', 'wagon', 'suv',
-    'minivan', 'van', 'pickup', 'jeep', 'civic', 'micro', 'camper', 'limo', 'taxi',
-    'police', 'ambulance', 'bus', 'boxtruck', 'mediumtruck',
+    'sedan', 'coupe', 'hatchback', 'musclecar', 'sport', 'supercar', 'luxury', 'wagon',
+    'suv', 'minivan', 'van', 'pickup', 'jeep', 'civic', 'micro', 'camper', 'limo',
+    'taxi', 'police', 'ambulance', 'bus', 'boxtruck', 'mediumtruck',
   ];
   const palette = ['#c94f4f', '#4f7dc9', '#d8c14a', '#5bb573', '#9b6fc9', '#d68a3c', '#4fb0c9', '#b5b55b', '#cfcfd6', '#3a3a42'];
-  const cars: Car[] = [makeCar(v(590, 2550), 0, '#c94f4f')];
+  const lotCols = [2720, 3060, 3400, 3740, 4080, 4420];
+  const lotRows = [2760, 3140, 3520, 3900];
   let fi = 0;
-  for (let yi = 0; yi < roadY.length; yi++) {
-    for (let xi = 0; xi < roadX.length; xi++) {
-      const x = roadX[xi];
-      const y = roadY[yi];
-      if (inTrack.has(`${x},${y}`) || fi >= fleet.length) continue;
-      const angle = (xi + yi) % 2 === 0 ? 0 : Math.PI / 2;
-      cars.push(makeCar(v(x, y), angle, palette[fi % palette.length], fleet[fi]));
+  for (const ry of lotRows)
+    for (const cx of lotCols) {
+      if (fi >= fleet.length) break;
+      cars.push(makeCar(v(cx, ry), (fi % 2) * (Math.PI / 2), palette[fi % palette.length], fleet[fi]));
       fi++;
     }
-  }
+  // a rack with one of every weapon, laid out in a row along the top of the lot
+  const rack: Weapon[] = [PISTOL, RIFLE, SHOTGUN, SNIPER, KNIFE];
+  const pickups: Pickup[] = rack.map((wpn, i) => makePickup(v(2680 + i * 210, 2520), wpn));
+  // target dummies at the far side for weapon testing
+  enemySpots.push([4600, 2900, 'gunman'], [4600, 3300, 'brute'], [4300, 3720, 'smg'], [4650, 3720, 'marksman']);
 
-  // All on road intersections / the central plaza, i.e. open ground clear of the track.
-  const spots: [number, number, EnemyType][] = [
-    [1950, 1400, 'gunman'],
-    [2080, 1480, 'smg'],
-    [2010, 1560, 'brute'],
-    [1170, 1170, 'gunman'],
-    [1730, 610, 'marksman'],
-    [2290, 1170, 'smg'],
-    [2850, 1730, 'brute'],
-    [3410, 610, 'marksman'],
-    [2850, 2290, 'smg'],
-    [1730, 2290, 'gunman'],
-    [3410, 2290, 'brute'],
-    [610, 610, 'gunman'],
-    [2290, 1730, 'smg'],
-    [3410, 1170, 'marksman'],
-  ];
+  // ---------- Racing circuit (bottom-left) ----------
+  const RW = 32;
+  barriers.push(
+    { x: 200, y: 2450, w: 1880, h: RW }, // top
+    { x: 200, y: 2450, w: RW, h: 1780 }, // left
+    { x: 2048, y: 2450, w: RW, h: 1780 }, // right
+    { x: 200, y: 4198, w: 760, h: RW }, // bottom-left (pit gap x960..1320)
+    { x: 1320, y: 4198, w: 760, h: RW }, // bottom-right
+  );
+  buildings.push(
+    { x: 520, y: 2760, w: 760, h: 1180 }, // L-shaped infield: main column
+    { x: 1280, y: 2760, w: 480, h: 520 }, // L-shaped infield: top arm
+  );
+  const track: Track = {
+    pavement: [{ x: 200, y: 2450, w: 1880, h: 1780 }],
+    start: { x: 640, y: 3944, w: 26, h: 254 },
+  };
+  cars.push(makeCar(v(820, 4066), Math.PI, '#c94f4f', 'sport')); // race car on the start line
+
+  // ---------- Spawn (bottom-centre) ----------
+  const spawn = v(2340, 4090);
+  const player = makePlayer({ x: spawn.x, y: spawn.y }, loadout);
+  cars.push(makeCar(v(2440, 3820), 0, '#5bb573', 'coupe')); // a ride waiting by the spawn
+
   // Safety net: never place a hostile near the spawn.
-  const enemies = spots
+  const enemies = enemySpots
     .filter(([x, y]) => Math.hypot(x - spawn.x, y - spawn.y) > 700)
     .map(([x, y, t]) => makeEnemy(v(x, y), t));
+  const civilians = civSpots.map((p, i) => makeCivilian(p, CIVILIAN_COLORS[i % CIVILIAN_COLORS.length]));
 
   return {
     bounds,
@@ -390,7 +464,9 @@ export function buildWorld(loadout: Loadout): World {
     solids: [...buildings, ...barriers],
     player,
     enemies,
+    civilians,
     cars,
+    pickups,
     tracers: [],
     particles: [],
     muzzles: [],
