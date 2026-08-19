@@ -20,6 +20,7 @@ import {
   sub,
 } from './math';
 import { fireInterval } from './weapon';
+import { barrelDist } from './weaponart';
 import { AGGRO_TIME, hasLoS, resolveShot } from './combat';
 import { spawnCasing, spawnMuzzle } from './fx';
 import { sfxWeapon } from './audio';
@@ -38,7 +39,7 @@ function moveToward(e: Enemy, target: Vec2, speed: number, dt: number): void {
 
 function fireBurst(w: World, e: Enemy): void {
   const aimDir = fromAngle(e.aim);
-  const origin = add(e.pos, scale(aimDir, e.radius + 6));
+  const origin = add(e.pos, scale(aimDir, barrelDist(e.weapon, e.radius)));
   const baseAng = angleOf(sub(w.player.pos, origin));
   const pellets = Math.max(1, e.weapon.pellets);
   for (let i = 0; i < pellets; i++) {

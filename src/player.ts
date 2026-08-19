@@ -8,6 +8,7 @@ import type { Vec2 } from './math';
 import { enterCar } from './car';
 import { add, angleOf, approach, clamp, fromAngle, len, randSpread, resolveCircleRect, scale, sub } from './math';
 import { fireInterval } from './weapon';
+import { barrelDist } from './weaponart';
 import { meleeHit, resolveShot } from './combat';
 import { addShake, spawnCasing, spawnMuzzle, spawnSlash } from './fx';
 import { sfxDryFire, sfxReload, sfxWeapon } from './audio';
@@ -168,7 +169,7 @@ export function updatePlayer(w: World, input: Input, aimWorld: Vec2, dt: number)
       p.aimKick = 0.3;
     }
   } else {
-    const shootOrigin = add(p.pos, scale(aimDir, p.radius + 6));
+    const shootOrigin = add(p.pos, scale(aimDir, barrelDist(wpn, p.radius)));
     if (canFire && p.fireTimer <= 0) {
       const cone = Math.min(p.spread, wpn.spreadMax);
       const pellets = Math.max(1, wpn.pellets);

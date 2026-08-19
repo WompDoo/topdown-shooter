@@ -4,9 +4,11 @@
 
 import type { Car, Enemy, EnemyType, World } from './world';
 import type { Input } from './input';
+import type { Weapon } from './weapon';
 import { fromAngle, randSpread } from './math';
 import { nearestCarIndex } from './car';
-import { vehicleAtlas, wreckAtlas } from './sprites';
+import { vehicleAtlas, weaponSheet, wreckAtlas } from './sprites';
+import { GRIP_FWD, WEAPON_SCALE, weaponArt } from './weaponart';
 import { VEHICLES } from './vehicles';
 
 export interface Camera {
@@ -251,6 +253,33 @@ function drawCorpse(ctx: CanvasRenderingContext2D, e: Enemy): void {
   ctx.fill();
 }
 
+// Draw a held weapon sprite: grip near the hand, barrel forward along `aim`,
+// vertically flipped when aiming into the left half so it never appears
+// upside-down. Returns false if the atlas or this weapon's art isn't ready yet,
+// so the caller can fall back to the old drawn stub.
+function drawWeapon(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  aim: number,
+  weapon: Weapon,
+  recoil = 0,
+): boolean {
+  const sheet = weaponSheet();
+  const art = weaponArt(weapon);
+  if (!sheet || !art) return false;
+  const w = art.sw * WEAPON_SCALE;
+  const h = art.sh * WEAPON_SCALE;
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(aim);
+  if (Math.cos(aim) < 0) ctx.scale(1, -1);
+  ctx.imageSmoothingEnabled = false; // keep the pixel art crisp
+  ctx.drawImage(sheet, art.sx, art.sy, art.sw, art.sh, GRIP_FWD - recoil, -h / 2, w, h);
+  ctx.restore();
+  return true;
+}
+
 function drawEnemy(ctx: CanvasRenderingContext2D, e: Enemy): void {
   const dir = fromAngle(e.aim);
   if (e.telegraph > 0) {
@@ -267,12 +296,14 @@ function drawEnemy(ctx: CanvasRenderingContext2D, e: Enemy): void {
   ctx.beginPath();
   ctx.arc(e.pos.x, e.pos.y, e.radius, 0, Math.PI * 2);
   ctx.fill();
-  ctx.strokeStyle = '#20140f';
-  ctx.lineWidth = 4;
-  ctx.beginPath();
-  ctx.moveTo(e.pos.x, e.pos.y);
-  ctx.lineTo(e.pos.x + dir.x * (e.radius + 9), e.pos.y + dir.y * (e.radius + 9));
-  ctx.stroke();
+  if (!drawWeapon(ctx, e.pos.x, e.pos.y, e.aim, e.weapon)) {
+    ctx.strokeStyle = '#20140f';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(e.pos.x, e.pos.y);
+    ctx.lineTo(e.pos.x + dir.x * (e.radius + 9), e.pos.y + dir.y * (e.radius + 9));
+    ctx.stroke();
+  }
   if (e.flash > 0) {
     ctx.fillStyle = `rgba(255,255,255,${(e.flash / 0.09) * 0.8})`;
     ctx.beginPath();
@@ -320,14 +351,17 @@ function drawPlayer(ctx: CanvasRenderingContext2D, w: World): void {
   ctx.beginPath();
   ctx.arc(p.pos.x, p.pos.y, p.radius, 0, Math.PI * 2);
   ctx.fill();
-  const isMelee = p.weapon.kind === 'melee';
-  const reach = (isMelee ? p.radius + 16 : p.radius + 12) - p.aimKick * 14;
-  ctx.strokeStyle = isMelee ? '#dfe9ef' : COL.playerLimb;
-  ctx.lineWidth = isMelee ? 3 : 4;
-  ctx.beginPath();
-  ctx.moveTo(p.pos.x, p.pos.y);
-  ctx.lineTo(p.pos.x + dir.x * reach, p.pos.y + dir.y * reach);
-  ctx.stroke();
+  if (!drawWeapon(ctx, p.pos.x, p.pos.y, p.aim, p.weapon, p.aimKick * 10)) {
+    // Fallback until the weapons atlas loads: the old arm/gun stub.
+    const isMelee = p.weapon.kind === 'melee';
+    const reach = (isMelee ? p.radius + 16 : p.radius + 12) - p.aimKick * 14;
+    ctx.strokeStyle = isMelee ? '#dfe9ef' : COL.playerLimb;
+    ctx.lineWidth = isMelee ? 3 : 4;
+    ctx.beginPath();
+    ctx.moveTo(p.pos.x, p.pos.y);
+    ctx.lineTo(p.pos.x + dir.x * reach, p.pos.y + dir.y * reach);
+    ctx.stroke();
+  }
   if (p.flash > 0) {
     ctx.fillStyle = `rgba(255,120,120,${(p.flash / 0.12) * 0.8})`;
     ctx.beginPath();

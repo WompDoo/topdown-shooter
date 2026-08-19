@@ -75,3 +75,10 @@ repo Actions secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`.
 
 Pull requests also get their own Cloudflare Pages preview deployment, so a branch
 can be played on a live URL before it's merged.
+
+## Credits
+
+Weapon sprites are from **"The Ultimate Weapons Pack" by Jestan**, used under
+Jestan's Public License (free use in games with attribution). The sheet ships as
+`public/sprites/weapons.png`; `src/weaponart.ts` maps each in-game weapon to its
+cell on it.
