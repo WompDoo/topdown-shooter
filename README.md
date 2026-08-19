@@ -72,3 +72,6 @@ Per-weapon procedural WebAudio (synth). A drop-in loader checks
 Pushing to `main` runs CI (lint + typecheck + build) and deploys `dist/` to
 Cloudflare Pages via GitHub Actions (`.github/workflows/ci.yml`). Requires the
 repo Actions secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`.
+
+Pull requests also get their own Cloudflare Pages preview deployment, so a branch
+can be played on a live URL before it's merged.
