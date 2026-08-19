@@ -46,6 +46,15 @@ function nearestVariant(color: string): string {
 export function vehicleAtlas(kind: VehicleKind, color: string): HTMLImageElement | null {
   const variant = VEHICLES[kind].liveried ? 'default' : nearestVariant(color);
   const key = `${kind}_${variant}`;
+  return load(key);
+}
+
+// The burnt-wreck atlas for a kind (8 headings in one row, colour-independent).
+export function wreckAtlas(kind: VehicleKind): HTMLImageElement | null {
+  return load(`wreck_${kind}`);
+}
+
+function load(key: string): HTMLImageElement | null {
   let img = images[key];
   if (!img) {
     img = new Image();

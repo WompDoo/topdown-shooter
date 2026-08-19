@@ -63,6 +63,74 @@ export function spawnBlood(w: World, pos: Vec2, dir: number, count = 10): void {
   }
 }
 
+// Damage smoke, shade + size escalating with how wrecked the car is.
+const SMOKE_SHADE = { light: '184,184,190', dark: '70,68,72', black: '26,24,24' };
+export function spawnSmokePuff(w: World, pos: Vec2, shade: keyof typeof SMOKE_SHADE, size: number): void {
+  w.particles.push({
+    pos: { x: pos.x + randSpread(4), y: pos.y + randSpread(4) },
+    vel: fromAngle(rand() * Math.PI * 2, randRange(6, 22)),
+    life: randRange(0.7, 1.5),
+    maxLife: 1.5,
+    size,
+    color: `rgba(${SMOKE_SHADE[shade]},0.6)`,
+    drag: 1.1,
+    kind: 'smoke',
+    angle: 0,
+    spin: 0,
+  });
+}
+
+// Small licking flame for a car that's about to blow.
+export function spawnFire(w: World, pos: Vec2): void {
+  w.particles.push({
+    pos: { x: pos.x + randSpread(3), y: pos.y + randSpread(3) },
+    vel: fromAngle(rand() * Math.PI * 2, randRange(20, 70)),
+    life: randRange(0.18, 0.4),
+    maxLife: 0.4,
+    size: randRange(3, 6),
+    color: rand() < 0.5 ? '#ffb028' : '#ff5a1e',
+    drag: 3,
+    kind: 'spark',
+    angle: 0,
+    spin: 0,
+  });
+}
+
+export function spawnExplosion(w: World, pos: Vec2, scale = 1): void {
+  addShake(w, Math.min(14, 9 * scale));
+  addHitstop(w, 0.08);
+  w.decals.push({ pos: { ...pos }, r: randRange(24, 34) * scale, color: 'rgba(18,14,12,0.6)' });
+  for (let i = 0; i < Math.round(32 * scale); i++) {
+    const sp = randRange(120, 540) * scale;
+    w.particles.push({
+      pos: { ...pos },
+      vel: fromAngle(rand() * Math.PI * 2, sp),
+      life: randRange(0.25, 0.6),
+      maxLife: 0.6,
+      size: randRange(3, 8) * scale,
+      color: rand() < 0.45 ? '#ffd066' : rand() < 0.7 ? '#ff7a29' : '#e23b1e',
+      drag: 5,
+      kind: 'spark',
+      angle: 0,
+      spin: 0,
+    });
+  }
+  for (let i = 0; i < Math.round(16 * scale); i++) {
+    w.particles.push({
+      pos: { ...pos },
+      vel: fromAngle(rand() * Math.PI * 2, randRange(20, 130) * scale),
+      life: randRange(0.9, 1.9),
+      maxLife: 1.9,
+      size: randRange(8, 17) * scale,
+      color: rand() < 0.5 ? 'rgba(38,34,32,0.6)' : 'rgba(78,74,72,0.5)',
+      drag: 1.4,
+      kind: 'smoke',
+      angle: 0,
+      spin: 0,
+    });
+  }
+}
+
 export function spawnCasing(w: World, pos: Vec2, aim: number): void {
   // Ejects to the shooter's right, spins as it slides.
   const a = aim + Math.PI / 2 + randSpread(0.3);

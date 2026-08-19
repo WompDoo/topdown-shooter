@@ -2,11 +2,12 @@
 // instant ray that stops at the nearest building, car, or body. Getting shot (or
 // a round snapping past) makes nearby hostiles turn on the player.
 
-import type { Enemy, World } from './world';
+import type { Car, Enemy, World } from './world';
 import type { Vec2 } from './math';
 import { add, angleDiff, angleOf, clamp, fromAngle, len, rayVsCircle, rayVsRect, scale, sub } from './math';
 import { addHitstop, addShake, spawnBlood, spawnDeath, spawnSparks, spawnTracer } from './fx';
 import { sfxEnemyDeath, sfxImpactFlesh, sfxImpactWall, sfxPlayerHurt } from './audio';
+import { damageCar } from './car';
 
 export const AGGRO_TIME = 9; // seconds a hostile keeps hunting after being provoked
 
@@ -47,6 +48,7 @@ export function resolveShot(
   const dir = fromAngle(angle);
   let best = range;
   let hitEnemy: Enemy | null = null;
+  let hitCar: Car | null = null;
   let hitPlayer = false;
   let hitSolid = false;
 
@@ -55,6 +57,7 @@ export function resolveShot(
     if (t < best) {
       best = t;
       hitEnemy = null;
+      hitCar = null;
       hitPlayer = false;
       hitSolid = true;
     }
@@ -64,8 +67,9 @@ export function resolveShot(
     if (t < best) {
       best = t;
       hitEnemy = null;
+      hitCar = c;
       hitPlayer = false;
-      hitSolid = true;
+      hitSolid = false;
     }
   }
 
@@ -76,6 +80,7 @@ export function resolveShot(
       if (t < best) {
         best = t;
         hitEnemy = e;
+        hitCar = null;
         hitSolid = false;
       }
     }
@@ -86,6 +91,7 @@ export function resolveShot(
       if (t < best) {
         best = t;
         hitPlayer = true;
+        hitCar = null;
         hitSolid = false;
       }
     }
@@ -124,6 +130,10 @@ export function resolveShot(
       addHitstop(w, 0.12);
       addShake(w, 8);
     }
+  } else if (hitCar) {
+    damageCar(w, hitCar, dmg);
+    spawnSparks(w, end, angle, 5);
+    sfxImpactWall();
   } else if (hitSolid) {
     spawnSparks(w, end, angle, 7);
     sfxImpactWall();

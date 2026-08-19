@@ -5,6 +5,7 @@
 import type { Input } from './input';
 import type { Player, World } from './world';
 import type { Vec2 } from './math';
+import { enterCar } from './car';
 import { add, angleOf, approach, clamp, fromAngle, len, randSpread, resolveCircleRect, scale, sub } from './math';
 import { fireInterval } from './weapon';
 import { meleeHit, resolveShot } from './combat';
@@ -99,6 +100,27 @@ export function updatePlayer(w: World, input: Input, aimWorld: Vec2, dt: number)
   if (input.isDown('KeyD') || input.isDown('ArrowRight')) ix += 1;
   if (input.isDown('KeyW') || input.isDown('ArrowUp')) iy -= 1;
   if (input.isDown('KeyS') || input.isDown('ArrowDown')) iy += 1;
+
+  // Auto-walk to a car after pressing F near it. Any manual input cancels it;
+  // arriving hops in.
+  if (p.walkTo >= 0) {
+    const car = w.cars[p.walkTo];
+    if (ix !== 0 || iy !== 0 || !car || car.dead) {
+      p.walkTo = -1;
+    } else {
+      const dx = car.pos.x - p.pos.x;
+      const dy = car.pos.y - p.pos.y;
+      const d = Math.hypot(dx, dy);
+      if (d <= p.radius + car.radius + 10) {
+        enterCar(w, p.walkTo);
+        p.walkTo = -1;
+        return;
+      }
+      ix = dx / d;
+      iy = dy / d;
+    }
+  }
+
   const moveLen = Math.hypot(ix, iy);
   const move: Vec2 = moveLen > 0 ? { x: ix / moveLen, y: iy / moveLen } : { x: 0, y: 0 };
   const sprinting = input.isDown('ShiftLeft') || input.isDown('ShiftRight');

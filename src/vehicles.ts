@@ -117,11 +117,13 @@ export interface VehicleSpec {
   h: number; // collision width
   radius: number; // collision circle
   liveried: boolean;
+  maxHp: number;
   handling: Handling;
 }
 
 function derive(kind: VehicleKind, r: Raw): VehicleSpec {
   const h = Math.round(r.ew * FOOTPRINT_TO_COLLISION);
+  const handling = HANDLING[CLASS_OF[kind]];
   return {
     cell: r.cell,
     draw: Math.round(r.cell * SPRITE_TO_WORLD),
@@ -129,11 +131,10 @@ function derive(kind: VehicleKind, r: Raw): VehicleSpec {
     h,
     radius: Math.round(h * 0.85),
     liveried: r.liveried === true,
-    handling: HANDLING[CLASS_OF[kind]],
+    maxHp: Math.round(200 * handling.mass), // heavier = tougher
+    handling,
   };
 }
-
-export const VEHICLE_FRAMES = 12; // drive-animation frames per direction
 
 export const VEHICLES = Object.fromEntries(
   Object.entries(RAW).map(([k, r]) => [k, derive(k as VehicleKind, r)]),

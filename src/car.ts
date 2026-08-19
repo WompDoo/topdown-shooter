@@ -10,7 +10,7 @@ import type { Car, World } from './world';
 import type { Input } from './input';
 import { VEHICLES } from './vehicles';
 import { clamp, collideCircleRect, fromAngle, resolveCircleRect } from './math';
-import { addHitstop, addShake, spawnBlood, spawnDeath } from './fx';
+import { addHitstop, addShake, spawnBlood, spawnDeath, spawnExplosion, spawnFire, spawnSmokePuff } from './fx';
 import { sfxEnemyDeath } from './audio';
 
 const ACCEL = 640;
@@ -28,12 +28,24 @@ const SKID_MIN = 55; // lateral speed above which the tyres leave marks
 const WALL_BOUNCE = 0.15; // restitution off walls (0 = dead stop, 1 = full bounce)
 const WALL_SCRUB = 0.08; // tangential speed lost per wall contact (scrape friction)
 const LOOSE_DRAG = 1.1; // how fast an abandoned car coasts to a stop
-const ENTER_REACH = 34;
+export const ENTER_REACH = 34;
 const RUN_OVER_SPEED = 120;
 const DIVE_SPEED = 150; // bail out above this and you tumble instead of stepping off
 const DIVE_TIME = 0.55; // seconds of tumble
+const WALL_DAMAGE_MIN = 170; // into-wall speed a hit must exceed to dent the car
+const CAR_DAMAGE_MIN = 150; // closing speed a car-car bump must exceed to dent
+const DAMAGE_PER_SPEED = 0.6; // hp lost per unit of speed above the threshold
+const SMOKE_HP = 0.6; // start smoking below this fraction of max hp
+const BURN_HP = 0.12; // catch fire below this; then burn down to the explosion
+const BLOODY_TIRE_TIME = 1.4; // seconds of red tyre tracks after a run-over
+const EXPLOSION_RADIUS = 150;
+const EXPLOSION_ENEMY_DMG = 500;
+const EXPLOSION_PLAYER_DMG = 55;
+const EXPLOSION_CAR_DMG = 120;
+const MAX_GORE = 6;
 
 export function updateCar(w: World, car: Car, input: Input, dt: number): void {
+  if (car.dead) return;
   const handbrake = input.isDown('Space');
   const hnd = VEHICLES[car.kind].handling;
 
@@ -79,7 +91,6 @@ export function updateCar(w: World, car: Car, input: Input, dt: number): void {
   const prevY = car.pos.y;
   car.pos.x += car.vel.x * dt;
   car.pos.y += car.vel.y * dt;
-  car.odo += Math.hypot(car.vel.x, car.vel.y) * dt;
 
   // Tyre marks while the car slides sideways.
   if (Math.abs(vLat) > SKID_MIN && speed > 60) {
@@ -100,6 +111,12 @@ export function updateCar(w: World, car: Car, input: Input, dt: number): void {
 // An abandoned car keeps its momentum and coasts to a stop, still colliding with
 // the world and mowing down anyone in its path.
 export function updateLooseCar(w: World, car: Car, dt: number): void {
+  if (car.dead) {
+    car.vel.x = 0;
+    car.vel.y = 0;
+    car.speed = 0;
+    return;
+  }
   const speed = Math.hypot(car.vel.x, car.vel.y);
   if (speed < 6) {
     car.vel.x = 0;
@@ -112,7 +129,6 @@ export function updateLooseCar(w: World, car: Car, dt: number): void {
   car.vel.y *= f;
   car.pos.x += car.vel.x * dt;
   car.pos.y += car.vel.y * dt;
-  car.odo += Math.hypot(car.vel.x, car.vel.y) * dt;
   collideCarWalls(w, car);
   carRunOver(w, car);
 }
@@ -143,6 +159,7 @@ function collideCarWalls(w: World, car: Car): void {
   if (car.pos.y > maxY && car.vel.y > 0) { car.pos.y = maxY; impact = Math.max(impact, car.vel.y); car.vel.y *= -WALL_BOUNCE; }
 
   if (impact > 40) addShake(w, Math.min(9, impact * 0.02));
+  if (impact > WALL_DAMAGE_MIN) damageCar(w, car, (impact - WALL_DAMAGE_MIN) * DAMAGE_PER_SPEED);
   const fwd = fromAngle(car.angle);
   car.speed = car.vel.x * fwd.x + car.vel.y * fwd.y;
 }
@@ -160,11 +177,145 @@ function carRunOver(w: World, car: Car): void {
     e.vel.y += car.vel.y * 0.8;
     spawnBlood(w, e.pos, car.angle, 16);
     addShake(w, 6);
+    addGore(car, e.pos);
+    car.bloodyTires = BLOODY_TIRE_TIME;
     if (e.hp <= 0 && e.alive) {
       e.alive = false;
       spawnDeath(w, e.pos, car.angle);
       sfxEnemyDeath();
       addHitstop(w, 0.05);
+    }
+  }
+}
+
+// Stamp a blood splat onto the car where the body hit them, kept in the car's
+// own frame so it stays put as the car turns. Clamped to the front half.
+function addGore(car: Car, at: { x: number; y: number }): void {
+  const fwd = fromAngle(car.angle);
+  const relX = at.x - car.pos.x;
+  const relY = at.y - car.pos.y;
+  const local = clamp(relX * fwd.x + relY * fwd.y, -car.w * 0.1, car.w * 0.5);
+  const lateral = clamp(relX * -fwd.y + relY * fwd.x, -car.h * 0.5, car.h * 0.5);
+  car.gore.push({ x: local, y: lateral, r: 3 + Math.random() * 3 });
+  if (car.gore.length > MAX_GORE) car.gore.shift();
+}
+
+// Damage + destruction. A destroyed car explodes into a burnt wreck.
+export function damageCar(w: World, car: Car, amount: number): void {
+  if (car.dead || amount <= 0) return;
+  car.hp -= amount;
+  if (car.hp <= 0) destroyCar(w, car);
+}
+
+function destroyCar(w: World, car: Car): void {
+  if (car.dead) return;
+  car.dead = true;
+  car.hp = 0;
+  car.pop = 1;
+  car.vel.x *= 0.3;
+  car.vel.y *= 0.3;
+  if (car.occupant === 'player') exitCar(w); // fling the driver clear first
+  const scale = clamp(car.radius / 26, 0.85, 1.9);
+  spawnExplosion(w, car.pos, scale);
+  const r = EXPLOSION_RADIUS * (0.7 + scale * 0.3);
+  for (const e of w.enemies) {
+    if (!e.alive) continue;
+    if (Math.hypot(e.pos.x - car.pos.x, e.pos.y - car.pos.y) > r + e.radius) continue;
+    e.hp -= EXPLOSION_ENEMY_DMG;
+    e.aggro = 9;
+    if (e.hp <= 0) {
+      e.alive = false;
+      spawnDeath(w, e.pos, car.angle);
+      sfxEnemyDeath();
+    }
+  }
+  const p = w.player;
+  if (!p.downed) {
+    const pd = Math.hypot(p.pos.x - car.pos.x, p.pos.y - car.pos.y);
+    if (pd < r + p.radius) {
+      p.hp -= EXPLOSION_PLAYER_DMG * (1 - pd / (r + p.radius));
+      p.flash = 0.14;
+      if (p.hp <= 0) {
+        p.hp = 0;
+        p.downed = true;
+        w.state = 'dead';
+        w.stateTimer = 0;
+        spawnDeath(w, p.pos, car.angle);
+      }
+    }
+  }
+  // Chain: nearby cars catch the blast (they blow on their own next tick).
+  for (const other of w.cars) {
+    if (other === car || other.dead) continue;
+    if (Math.hypot(other.pos.x - car.pos.x, other.pos.y - car.pos.y) > r + other.radius) continue;
+    damageCar(w, other, EXPLOSION_CAR_DMG);
+  }
+}
+
+// Per-tick cosmetic + burn state for every car: the explosion pop settling, the
+// GTA-style damage smoke escalating with wreckedness, the burn-down to a blast,
+// and red tyre tracks just after a run-over. Called for all cars each tick.
+export function carEffects(w: World, car: Car, dt: number): void {
+  if (car.pop > 0) car.pop = Math.max(0, car.pop - dt * 2.2);
+
+  const fwd = fromAngle(car.angle);
+  const nose = { x: car.pos.x + fwd.x * car.w * 0.3, y: car.pos.y + fwd.y * car.w * 0.3 };
+
+  if (car.dead) {
+    car.smoke -= dt;
+    if (car.smoke <= 0) {
+      car.smoke = 0.24;
+      spawnSmokePuff(w, car.pos, 'black', 9 + Math.random() * 4);
+    }
+  } else {
+    const frac = car.hp / car.maxHp;
+    if (frac < BURN_HP) {
+      // On fire: flames + black smoke, and burning down to the explosion.
+      damageCar(w, car, car.maxHp * 0.05 * dt);
+      car.smoke -= dt;
+      if (car.smoke <= 0) {
+        car.smoke = 0.05;
+        spawnFire(w, nose);
+        spawnSmokePuff(w, nose, 'black', 8 + Math.random() * 4);
+      }
+    } else if (frac < SMOKE_HP) {
+      // Three smoke tiers before the fire.
+      let interval: number;
+      let shade: 'light' | 'dark';
+      let size: number;
+      if (frac < 0.28) {
+        interval = 0.06;
+        shade = 'dark';
+        size = 9;
+      } else if (frac < 0.44) {
+        interval = 0.09;
+        shade = 'light';
+        size = 8;
+      } else {
+        interval = 0.18;
+        shade = 'light';
+        size = 5;
+      }
+      car.smoke -= dt;
+      if (car.smoke <= 0) {
+        car.smoke = interval;
+        spawnSmokePuff(w, nose, shade, size);
+      }
+    }
+  }
+
+  if (car.bloodyTires > 0) {
+    car.bloodyTires -= dt;
+    if (Math.hypot(car.vel.x, car.vel.y) > 50) {
+      const right = { x: -fwd.y, y: fwd.x };
+      const rx = car.pos.x - fwd.x * car.w * 0.35;
+      const ry = car.pos.y - fwd.y * car.w * 0.35;
+      const ox = right.x * car.h * 0.42;
+      const oy = right.y * car.h * 0.42;
+      const bx = fwd.x * 7;
+      const by = fwd.y * 7;
+      w.skids.push({ a: { x: rx - ox - bx, y: ry - oy - by }, b: { x: rx - ox, y: ry - oy }, life: 6, blood: true });
+      w.skids.push({ a: { x: rx + ox - bx, y: ry + oy - by }, b: { x: rx + ox, y: ry + oy }, life: 6, blood: true });
     }
   }
 }
@@ -192,9 +343,11 @@ export function resolveCarCollisions(w: World): void {
       }
       nx /= d;
       ny /= d;
-      const imA = 1 / VEHICLES[a.kind].handling.mass;
-      const imB = 1 / VEHICLES[b.kind].handling.mass;
+      // Wrecks are immovable (infinite mass); two of them can't interact.
+      const imA = a.dead ? 0 : 1 / VEHICLES[a.kind].handling.mass;
+      const imB = b.dead ? 0 : 1 / VEHICLES[b.kind].handling.mass;
       const imSum = imA + imB;
+      if (imSum === 0) continue;
       // separate the overlap, lighter car yields more
       const overlap = min - d;
       a.pos.x -= nx * overlap * (imA / imSum);
@@ -209,17 +362,26 @@ export function resolveCarCollisions(w: World): void {
         a.vel.y -= jimp * imA * ny;
         b.vel.x += jimp * imB * nx;
         b.vel.y += jimp * imB * ny;
+        // A hard shunt dents both cars.
+        const closing = -rvn;
+        if (closing > CAR_DAMAGE_MIN) {
+          const dmg = (closing - CAR_DAMAGE_MIN) * DAMAGE_PER_SPEED;
+          damageCar(w, a, dmg);
+          damageCar(w, b, dmg);
+        }
       }
     }
   }
 }
 
-// Index of the nearest car the player could get into, or -1.
-export function nearestCarIndex(w: World): number {
+// Index of the nearest drivable (not a wreck) car within reach of the player,
+// or -1. A larger reach is used to start an auto-walk to the car.
+export function nearestCarIndex(w: World, reach: number = ENTER_REACH): number {
   const p = w.player;
   let idx = -1;
-  let bd = p.radius + ENTER_REACH;
+  let bd = p.radius + reach;
   for (let i = 0; i < w.cars.length; i++) {
+    if (w.cars[i].dead) continue;
     const d = Math.hypot(w.cars[i].pos.x - p.pos.x, w.cars[i].pos.y - p.pos.y);
     if (d < bd) {
       bd = d;
@@ -228,6 +390,8 @@ export function nearestCarIndex(w: World): number {
   }
   return idx;
 }
+
+export const AUTO_PATH_RANGE = 260; // press F within this to auto-walk to a car
 
 export function enterCar(w: World, idx: number): void {
   const car = w.cars[idx];

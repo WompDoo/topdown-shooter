@@ -45,6 +45,7 @@ export interface Player {
   flash: number;
   downed: boolean;
   inCar: number; // index into world.cars, or -1 on foot
+  walkTo: number; // car index the player is auto-walking to enter, or -1
   enterTimer: number; // debounce for enter/exit
   dive: number; // >0 = tumbling after bailing from a moving car (seconds left)
   roll: number; // accumulated tumble rotation for the dive visual
@@ -91,8 +92,21 @@ export interface Car {
   color: string;
   kind: VehicleKind;
   hp: number;
+  maxHp: number;
+  dead: boolean; // destroyed: a burnt wreck, no longer drivable
+  pop: number; // 1 at the moment of explosion, decays: lifts/enlarges the sprite
+  smoke: number; // countdown to the next damage smoke/fire puff
+  bloodyTires: number; // seconds left of leaving red tyre tracks after a run-over
+  gore: GoreDecal[]; // blood splats on the car, in its own frame (+x = front)
   occupant: 'none' | 'player';
-  odo: number; // distance travelled, drives the wheel animation
+}
+
+// A blood splat fixed to the car body, positioned in the car's local frame
+// (x forward, y right, both in world px from centre) so it rotates with it.
+export interface GoreDecal {
+  x: number;
+  y: number;
+  r: number;
 }
 
 export interface Tracer {
@@ -144,6 +158,7 @@ export interface Skid {
   a: Vec2;
   b: Vec2;
   life: number;
+  blood?: boolean; // red tyre track laid down just after a run-over
 }
 
 // A test racetrack: a paved area with a start/finish line. Its guardrails live
@@ -199,6 +214,7 @@ function makePlayer(pos: Vec2, loadout: Loadout): Player {
     flash: 0,
     downed: false,
     inCar: -1,
+    walkTo: -1,
     enterTimer: 0,
     dive: 0,
     roll: 0,
@@ -267,9 +283,14 @@ function makeCar(pos: Vec2, angle: number, color: string, kind: VehicleKind = 's
     radius: spec.radius,
     color,
     kind,
-    hp: 200,
+    hp: spec.maxHp,
+    maxHp: spec.maxHp,
+    dead: false,
+    pop: 0,
+    smoke: 0,
+    bloodyTires: 0,
+    gore: [],
     occupant: 'none',
-    odo: 0,
   };
 }
 

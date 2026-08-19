@@ -6,8 +6,8 @@ import type { Car, Enemy, EnemyType, World } from './world';
 import type { Input } from './input';
 import { fromAngle, randSpread } from './math';
 import { nearestCarIndex } from './car';
-import { vehicleAtlas } from './sprites';
-import { VEHICLES, VEHICLE_FRAMES } from './vehicles';
+import { vehicleAtlas, wreckAtlas } from './sprites';
+import { VEHICLES } from './vehicles';
 
 export interface Camera {
   x: number;
@@ -123,7 +123,9 @@ function drawSkids(ctx: CanvasRenderingContext2D, w: World): void {
   ctx.lineCap = 'round';
   ctx.lineWidth = 3.5;
   for (const s of w.skids) {
-    ctx.strokeStyle = `rgba(12,14,18,${Math.min(0.4, (s.life / 8) * 0.4)})`;
+    ctx.strokeStyle = s.blood
+      ? `rgba(122,20,26,${Math.min(0.6, (s.life / 6) * 0.6)})`
+      : `rgba(12,14,18,${Math.min(0.4, (s.life / 8) * 0.4)})`;
     ctx.beginPath();
     ctx.moveTo(s.a.x, s.a.y);
     ctx.lineTo(s.b.x, s.b.y);
@@ -172,30 +174,56 @@ function drawDecals(ctx: CanvasRenderingContext2D, w: World): void {
   }
 }
 
-// World units the car must travel to advance one animation frame (wheels spin
-// with distance, so parked cars rest on frame 0).
-const CAR_ANIM_STEP = 16;
+const DIR48 = (Math.PI * 2) / 48; // one heading step of the 48-direction art
 
 function drawCar(ctx: CanvasRenderingContext2D, c: Car): void {
+  const spec = VEHICLES[c.kind];
+  const cell = spec.cell;
+  // Sprite leaps up and enlarges at the moment of an explosion, then settles.
+  const draw = spec.draw * (1 + c.pop * 0.7);
+  const lift = c.pop * spec.draw * 0.2;
+  const dx = c.pos.x - draw / 2;
+  const dy = c.pos.y - draw / 2 - lift;
+
+  if (c.dead) {
+    // While the blast is fresh, show the car flung up; then it's a burnt wreck.
+    if (c.pop > 0.4) {
+      const atlas = vehicleAtlas(c.kind, c.color);
+      if (atlas) {
+        const i = ((Math.round(c.angle / DIR48) % 48) + 48) % 48;
+        ctx.drawImage(atlas, (i % 12) * cell, Math.floor(i / 12) * cell, cell, cell, dx, dy, draw, draw);
+        return;
+      }
+    }
+    const wreck = wreckAtlas(c.kind);
+    if (!wreck) return; // nothing to fall back to; the explosion FX still played
+    const k = ((Math.round(c.angle / (Math.PI / 4)) % 8) + 8) % 8;
+    ctx.drawImage(wreck, k * cell, 0, cell, cell, dx, dy, draw, draw);
+    return;
+  }
+
   const atlas = vehicleAtlas(c.kind, c.color);
   if (!atlas) {
     drawCarRect(ctx, c);
     return;
   }
-  const spec = VEHICLES[c.kind];
-  const cell = spec.cell;
-  const draw = spec.draw;
-  // Pick the nearest of the 8 perspective sprites, then rotate it by the
-  // leftover angle so the heading is smooth (mismatch is at most +-22.5deg).
-  const step = Math.PI / 4;
-  const k = ((Math.round(c.angle / step) % 8) + 8) % 8;
-  const residual = c.angle - k * step;
-  const frame = Math.floor(c.odo / CAR_ANIM_STEP) % VEHICLE_FRAMES;
-  ctx.save();
-  ctx.translate(c.pos.x, c.pos.y);
-  ctx.rotate(residual);
-  ctx.drawImage(atlas, frame * cell, k * cell, cell, cell, -draw / 2, -draw / 2, draw, draw);
-  ctx.restore();
+  // 48 pre-drawn headings: pick the nearest, no rotation needed.
+  const idx = ((Math.round(c.angle / DIR48) % 48) + 48) % 48;
+  ctx.drawImage(atlas, (idx % 12) * cell, Math.floor(idx / 12) * cell, cell, cell, dx, dy, draw, draw);
+  if (c.gore.length) drawGore(ctx, c);
+}
+
+// Blood splats stamped on the body, kept in the car's frame so they turn with it.
+function drawGore(ctx: CanvasRenderingContext2D, c: Car): void {
+  const fwd = fromAngle(c.angle);
+  ctx.fillStyle = 'rgba(120,20,26,0.85)';
+  for (const g of c.gore) {
+    const x = c.pos.x + fwd.x * g.x - fwd.y * g.y;
+    const y = c.pos.y + fwd.y * g.x + fwd.x * g.y;
+    ctx.beginPath();
+    ctx.arc(x, y, g.r, 0, Math.PI * 2);
+    ctx.fill();
+  }
 }
 
 function drawCarRect(ctx: CanvasRenderingContext2D, c: Car): void {
