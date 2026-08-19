@@ -397,6 +397,20 @@ function drawParticles(ctx: CanvasRenderingContext2D, w: World): void {
       ctx.lineTo(p.pos.x - p.vel.x * 0.02, p.pos.y - p.vel.y * 0.02);
       ctx.stroke();
       ctx.globalCompositeOperation = 'source-over';
+    } else if (p.kind === 'fire') {
+      // Additive fireball: a white-hot core bleeding out to the ember colour.
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = a;
+      const grd = ctx.createRadialGradient(p.pos.x, p.pos.y, 0, p.pos.x, p.pos.y, p.size);
+      grd.addColorStop(0, 'rgba(255,246,214,0.95)');
+      grd.addColorStop(0.4, p.color);
+      grd.addColorStop(1, 'rgba(255,90,30,0)');
+      ctx.fillStyle = grd;
+      ctx.beginPath();
+      ctx.arc(p.pos.x, p.pos.y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.globalCompositeOperation = 'source-over';
     } else {
       ctx.globalAlpha = p.kind === 'smoke' ? a * 0.5 : a;
       ctx.fillStyle = p.color;

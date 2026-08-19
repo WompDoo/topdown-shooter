@@ -8,8 +8,9 @@
 
 import type { Car, World } from './world';
 import type { Input } from './input';
+import type { Vec2 } from './math';
 import { VEHICLES } from './vehicles';
-import { clamp, collideCircleRect, fromAngle, resolveCircleRect } from './math';
+import { angleDiff, clamp, collideCircleRect, fromAngle, randSpread, resolveCircleRect } from './math';
 import { addHitstop, addShake, spawnBlood, spawnDeath, spawnExplosion, spawnFire, spawnSmokePuff } from './fx';
 import { sfxEnemyDeath } from './audio';
 
@@ -32,17 +33,30 @@ export const ENTER_REACH = 34;
 const RUN_OVER_SPEED = 120;
 const DIVE_SPEED = 150; // bail out above this and you tumble instead of stepping off
 const DIVE_TIME = 0.55; // seconds of tumble
-const WALL_DAMAGE_MIN = 170; // into-wall speed a hit must exceed to dent the car
-const CAR_DAMAGE_MIN = 150; // closing speed a car-car bump must exceed to dent
-const DAMAGE_PER_SPEED = 0.6; // hp lost per unit of speed above the threshold
+const WALL_DAMAGE_MIN = 240; // into-wall speed a hit must exceed to dent the car
+const CAR_DAMAGE_MIN = 220; // closing speed a car-car bump must exceed to dent
+const DAMAGE_PER_SPEED = 0.5; // hp lost per unit of speed above the threshold
 const SMOKE_HP = 0.6; // start smoking below this fraction of max hp
-const BURN_HP = 0.12; // catch fire below this; then burn down to the explosion
+const BURN_HP = 0.1; // catch fire below this; then burn down to the explosion
+const BURN_RATE = 0.03; // fraction of max hp lost per second while ablaze (slow: a real stage)
+const WRECK_BURN_TIME = 6; // seconds a fresh wreck stays engulfed before it just smoulders
 const BLOODY_TIRE_TIME = 1.4; // seconds of red tyre tracks after a run-over
 const EXPLOSION_RADIUS = 150;
 const EXPLOSION_ENEMY_DMG = 500;
 const EXPLOSION_PLAYER_DMG = 55;
-const EXPLOSION_CAR_DMG = 120;
+const EXPLOSION_CAR_DMG = 260; // a blast still hurts neighbours (durable cars won't chain instantly)
 const MAX_GORE = 6;
+
+// --- Where a bullet lands scales its damage. Hits register on the body face
+// pointing at the shooter, so the shot's approach angle vs the car's heading
+// tells us the panel: the grille/engine bay (front) and a narrow slice dead
+// behind (the fuel tank) are weak points; the doors, flanks and broad rear body
+// are armoured and shrug rounds off. ---
+const ENGINE_MULT = 2.0; // front cone: engine bay
+const TANK_MULT = 2.6; // narrow rear cone: fuel tank (the sweet spot)
+const ARMOR_MULT = 0.45; // doors, flanks, rear body
+const ENGINE_HALF = 0.85; // rad, front cone half-width (~49deg)
+const TANK_HALF = 0.5; // rad, rear fuel-tank cone half-width (~29deg)
 
 export function updateCar(w: World, car: Car, input: Input, dt: number): void {
   if (car.dead) return;
@@ -73,13 +87,21 @@ export function updateCar(w: World, car: Car, input: Input, dt: number): void {
   let vFwd = car.vel.x * fwd.x + car.vel.y * fwd.y;
   let vLat = car.vel.x * right.x + car.vel.y * right.y;
 
+  // A damaged engine loses a little punch and top speed — no penalty until hp
+  // falls under 60%, then building as it nears death. Steering is left untouched
+  // so a smoking wreck-in-waiting is still controllable.
+  const frac = car.hp / car.maxHp;
+  const wear = clamp((0.6 - frac) / 0.6, 0, 1);
+  const accelMult = 1 - 0.3 * wear;
+  const topMult = 1 - 0.2 * wear;
+
   // engine + rolling resistance on the forward axis (no handbrake braking here —
   // the handbrake is for traction, not stopping)
-  if (throttle > 0) vFwd += ACCEL * hnd.accel * dt;
-  else if (throttle < 0) vFwd -= REV_ACCEL * hnd.accel * dt;
+  if (throttle > 0) vFwd += ACCEL * hnd.accel * accelMult * dt;
+  else if (throttle < 0) vFwd -= REV_ACCEL * hnd.accel * accelMult * dt;
   else vFwd -= Math.sign(vFwd) * Math.min(Math.abs(vFwd), ENGINE_DRAG * dt);
   vFwd *= Math.max(0, 1 - ROLL * dt);
-  vFwd = clamp(vFwd, -MAX_REV * hnd.top, MAX_FWD * hnd.top);
+  vFwd = clamp(vFwd, -MAX_REV * hnd.top, MAX_FWD * hnd.top * topMult);
 
   // lateral grip: the tyres bite, or the handbrake lets the back slide
   vLat *= Math.exp(-(handbrake ? HANDBRAKE_GRIP : GRIP * hnd.grip) * dt);
@@ -200,6 +222,16 @@ function addGore(car: Car, at: { x: number; y: number }): void {
   if (car.gore.length > MAX_GORE) car.gore.shift();
 }
 
+// Multiplier a bullet's damage takes for where it struck the car (see the zone
+// constants above). `hit` is the impact point; the angle from the car centre to
+// it, relative to the heading, picks the panel.
+export function bulletDamageMultiplier(car: Car, hit: Vec2): number {
+  const a = Math.abs(angleDiff(car.angle, Math.atan2(hit.y - car.pos.y, hit.x - car.pos.x)));
+  if (a < ENGINE_HALF) return ENGINE_MULT; // grille / engine bay up front
+  if (a > Math.PI - TANK_HALF) return TANK_MULT; // dead behind: the fuel tank
+  return ARMOR_MULT; // doors, flanks, rear body
+}
+
 // Damage + destruction. A destroyed car explodes into a burnt wreck.
 export function damageCar(w: World, car: Car, amount: number): void {
   if (car.dead || amount <= 0) return;
@@ -212,6 +244,8 @@ function destroyCar(w: World, car: Car): void {
   car.dead = true;
   car.hp = 0;
   car.pop = 1;
+  car.wreckFire = WRECK_BURN_TIME + Math.random() * 2;
+  car.smoke = 0; // start belching flame immediately, not after the old countdown
   car.vel.x *= 0.3;
   car.vel.y *= 0.3;
   if (car.occupant === 'player') exitCar(w); // fling the driver clear first
@@ -262,37 +296,54 @@ export function carEffects(w: World, car: Car, dt: number): void {
   const nose = { x: car.pos.x + fwd.x * car.w * 0.3, y: car.pos.y + fwd.y * car.w * 0.3 };
 
   if (car.dead) {
+    // A fresh wreck is engulfed in flame for a few seconds, then dies down to a
+    // thin smoulder that lingers.
     car.smoke -= dt;
-    if (car.smoke <= 0) {
-      car.smoke = 0.24;
-      spawnSmokePuff(w, car.pos, 'black', 9 + Math.random() * 4);
+    if (car.wreckFire > 0) {
+      car.wreckFire -= dt;
+      if (car.smoke <= 0) {
+        car.smoke = 0.05;
+        spawnFire(w, { x: car.pos.x + randSpread(car.w * 0.32), y: car.pos.y + randSpread(car.h * 0.32) });
+        spawnSmokePuff(w, car.pos, 'black', 10 + Math.random() * 5);
+      }
+    } else if (car.smoke <= 0) {
+      car.smoke = 0.55;
+      spawnSmokePuff(w, car.pos, 'dark', 7 + Math.random() * 3);
     }
   } else {
     const frac = car.hp / car.maxHp;
     if (frac < BURN_HP) {
-      // On fire: flames + black smoke, and burning down to the explosion.
-      damageCar(w, car, car.maxHp * 0.05 * dt);
+      // Ablaze: flames + black smoke, burning down to the explosion at BURN_RATE
+      // (slow, so the fire is a stage you watch build rather than a blink).
+      damageCar(w, car, car.maxHp * BURN_RATE * dt);
       car.smoke -= dt;
       if (car.smoke <= 0) {
         car.smoke = 0.05;
         spawnFire(w, nose);
-        spawnSmokePuff(w, nose, 'black', 8 + Math.random() * 4);
+        spawnSmokePuff(w, nose, 'black', 9 + Math.random() * 4);
       }
     } else if (frac < SMOKE_HP) {
-      // Three smoke tiers before the fire.
+      // Graduated smoke: a faint wisp when first hurt, thickening and darkening
+      // through several tiers, then heavy black smoke licking embers just before
+      // it catches fire — a gradual ramp into the blaze, not a jump.
       let interval: number;
       let shade: 'light' | 'dark';
       let size: number;
-      if (frac < 0.28) {
-        interval = 0.06;
+      if (frac < 0.2) {
+        interval = 0.07;
+        shade = 'dark';
+        size = 10;
+        if (Math.random() < 0.28) spawnFire(w, nose); // embers flicker before ignition
+      } else if (frac < 0.32) {
+        interval = 0.1;
         shade = 'dark';
         size = 9;
-      } else if (frac < 0.44) {
-        interval = 0.09;
+      } else if (frac < 0.45) {
+        interval = 0.14;
         shade = 'light';
         size = 8;
       } else {
-        interval = 0.18;
+        interval = 0.24;
         shade = 'light';
         size = 5;
       }

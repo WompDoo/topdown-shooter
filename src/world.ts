@@ -95,6 +95,7 @@ export interface Car {
   maxHp: number;
   dead: boolean; // destroyed: a burnt wreck, no longer drivable
   pop: number; // 1 at the moment of explosion, decays: lifts/enlarges the sprite
+  wreckFire: number; // seconds a fresh wreck keeps actively burning before it smoulders
   smoke: number; // countdown to the next damage smoke/fire puff
   bloodyTires: number; // seconds left of leaving red tyre tracks after a run-over
   gore: GoreDecal[]; // blood splats on the car, in its own frame (+x = front)
@@ -117,7 +118,7 @@ export interface Tracer {
   team: Team;
 }
 
-export type ParticleKind = 'spark' | 'blood' | 'casing' | 'smoke';
+export type ParticleKind = 'spark' | 'blood' | 'casing' | 'smoke' | 'fire';
 
 export interface Particle {
   pos: Vec2;
@@ -287,6 +288,7 @@ function makeCar(pos: Vec2, angle: number, color: string, kind: VehicleKind = 's
     maxHp: spec.maxHp,
     dead: false,
     pop: 0,
+    wreckFire: 0,
     smoke: 0,
     bloodyTires: 0,
     gore: [],

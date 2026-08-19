@@ -7,7 +7,7 @@ import type { Vec2 } from './math';
 import { add, angleDiff, angleOf, clamp, fromAngle, len, rayVsCircle, rayVsRect, scale, sub } from './math';
 import { addHitstop, addShake, spawnBlood, spawnDeath, spawnSparks, spawnTracer } from './fx';
 import { sfxEnemyDeath, sfxImpactFlesh, sfxImpactWall, sfxPlayerHurt } from './audio';
-import { damageCar } from './car';
+import { bulletDamageMultiplier, damageCar } from './car';
 
 export const AGGRO_TIME = 9; // seconds a hostile keeps hunting after being provoked
 
@@ -131,7 +131,7 @@ export function resolveShot(
       addShake(w, 8);
     }
   } else if (hitCar) {
-    damageCar(w, hitCar, dmg);
+    damageCar(w, hitCar, dmg * bulletDamageMultiplier(hitCar, end));
     spawnSparks(w, end, angle, 5);
     sfxImpactWall();
   } else if (hitSolid) {

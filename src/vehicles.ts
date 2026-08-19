@@ -131,7 +131,7 @@ function derive(kind: VehicleKind, r: Raw): VehicleSpec {
     h,
     radius: Math.round(h * 0.85),
     liveried: r.liveried === true,
-    maxHp: Math.round(200 * handling.mass), // heavier = tougher
+    maxHp: Math.round(600 * handling.mass), // heavier = tougher; cars are very durable
     handling,
   };
 }
