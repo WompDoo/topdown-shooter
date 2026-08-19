@@ -42,10 +42,14 @@ Other scripts: `npm run build` (production bundle to `dist/`), `npm run preview`
 - **Kinetic gunplay:** hitscan with recoil bloom, muzzle flash, tracers, casing
   ejection, screen shake, hitstop, blood, procedural SFX; magazine + reload; a
   primary + secondary you swap with 1/2 (pistol / rifle / shotgun / sniper / knife).
-- **Cars:** arcade momentum + grippy steering, a Space handbrake to drift (with
-  tyre marks), physics-based wall collisions (glancing hits slide, they don't dead-
-  stop), and lethal run-overs at speed. Bail out while moving for a GTA-style tumble
-  while the car keeps rolling. Sit in a car and bullets hit the car, not you.
+- **Cars:** every vehicle class drives differently — a real drivetrain (per-class
+  engine **torque curve** + an automatic **gearbox** with gear ratios, a rev
+  limiter, and a tach/gear HUD) makes a revvy sports car, a buzzy compact and a
+  ponderous truck all feel distinct. Grippy arcade steering with a Space handbrake
+  to drift (tyre marks), physics-based wall collisions (glancing hits slide, they
+  don't dead-stop), and lethal run-overs at speed. Bail out while moving for a
+  GTA-style tumble while the car keeps rolling. Sit in a car and bullets hit the
+  car, not you.
 - **Hostiles:** scattered gunmen, SMG runners, shotgun brutes, and marksmen. They
   idle/wander until they see you or you provoke them, then chase and shoot with a
   brief telegraph. Low player HP, no regen. Die → `WASTED`, press R to respawn.

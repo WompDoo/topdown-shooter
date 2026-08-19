@@ -88,6 +88,9 @@ export interface Car {
   pos: Vec2;
   angle: number; // heading, radians
   speed: number; // signed along heading
+  rpm: number; // engine revs
+  gear: number; // -1 = reverse, 0-based forward gears
+  shiftTimer: number; // gearbox shift lockout
   vel: Vec2;
   w: number;
   h: number;
@@ -322,6 +325,9 @@ function makeCar(pos: Vec2, angle: number, color: string, kind: VehicleKind = 's
     pos: { x: pos.x, y: pos.y },
     angle,
     speed: 0,
+    rpm: spec.handling.drivetrain.idleRpm,
+    gear: 0,
+    shiftTimer: 0,
     vel: v(),
     w: spec.w,
     h: spec.h,

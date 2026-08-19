@@ -10,16 +10,19 @@ import type { Car, World } from './world';
 import type { Input } from './input';
 import type { Vec2 } from './math';
 import { VEHICLES } from './vehicles';
+import type { Drivetrain } from './vehicles';
 import { angleDiff, clamp, collideCircleRect, collideCircleSegment, fromAngle, randSpread, resolveCircleRect } from './math';
 import { addHitstop, addShake, spawnBlood, spawnDeath, spawnExplosion, spawnFire, spawnSmokePuff } from './fx';
 import { sfxEnemyDeath } from './audio';
 
-const ACCEL = 640;
-const REV_ACCEL = 320;
-const ENGINE_DRAG = 260; // extra coast-down when off throttle
-const ROLL = 0.5; // rolling resistance (always on the forward axis)
-const MAX_FWD = 560;
-const MAX_REV = 190;
+const RPM_PER_SPEED = 2.75; // engine rpm gained per (px/s) x gear x finalDrive
+const DRIVE_K = 0.17; // torque x gearing -> forward acceleration force
+const DRAG_K = 0.00022; // aero drag (grows with v^2); light — redline sets top speed
+const ROLL_K = 0.05; // rolling resistance (linear in v)
+const BRAKE = 900; // braking deceleration (throttle held against motion)
+const ENGINE_BRAKE = 190; // coast-down deceleration off throttle
+const MAX_FWD_CAP = 1000; // safety clamp; drag limits real speed well below this
+const MAX_REV = 220; // reverse speed cap
 const TURN_RATE = 3.0; // rad/s of steering authority at speed
 const HB_TURN = 1.7; // extra steering authority with the handbrake pulled
 const GRIP = 9.0; // lateral traction — high = tyres bite, tight cornering
@@ -58,6 +61,18 @@ const ARMOR_MULT = 0.45; // doors, flanks, rear body
 const ENGINE_HALF = 0.85; // rad, front cone half-width (~49deg)
 const TANK_HALF = 0.5; // rad, rear fuel-tank cone half-width (~29deg)
 
+// Engine torque at a given rpm: a smooth hump peaking at peakRpm with a floor so
+// it always pulls a little off-cam, tapering to zero at redline (a rev limiter,
+// so top gear tops out at redline rather than over-revving).
+function torqueAt(d: Drivetrain, rpm: number): number {
+  if (rpm >= d.redlineRpm) return 0;
+  const x = (rpm - d.peakRpm) / (d.redlineRpm - d.idleRpm);
+  let t = clamp(1 - 1.7 * x * x, 0.28, 1);
+  const over = (rpm - 0.9 * d.redlineRpm) / (0.1 * d.redlineRpm);
+  if (over > 0) t *= Math.max(0, 1 - over);
+  return d.peakTorque * t;
+}
+
 export function updateCar(w: World, car: Car, input: Input, dt: number): void {
   if (car.dead) return;
   const handbrake = input.isDown('Space');
@@ -87,21 +102,48 @@ export function updateCar(w: World, car: Car, input: Input, dt: number): void {
   let vFwd = car.vel.x * fwd.x + car.vel.y * fwd.y;
   let vLat = car.vel.x * right.x + car.vel.y * right.y;
 
-  // A damaged engine loses a little punch and top speed — no penalty until hp
-  // falls under 60%, then building as it nears death. Steering is left untouched
-  // so a smoking wreck-in-waiting is still controllable.
+  // --- Drivetrain: an engine torque curve through an automatic gearbox ---
+  // A damaged engine makes less power (no penalty until under 60% hp, building as
+  // it nears death). Steering is left untouched so a smoking wreck is drivable.
+  const dtrain = hnd.drivetrain;
   const frac = car.hp / car.maxHp;
   const wear = clamp((0.6 - frac) / 0.6, 0, 1);
-  const accelMult = 1 - 0.3 * wear;
-  const topMult = 1 - 0.2 * wear;
+  const power = 1 - 0.32 * wear;
+  const wheelSpd = Math.abs(vFwd);
 
-  // engine + rolling resistance on the forward axis (no handbrake braking here —
-  // the handbrake is for traction, not stopping)
-  if (throttle > 0) vFwd += ACCEL * hnd.accel * accelMult * dt;
-  else if (throttle < 0) vFwd -= REV_ACCEL * hnd.accel * accelMult * dt;
-  else vFwd -= Math.sign(vFwd) * Math.min(Math.abs(vFwd), ENGINE_DRAG * dt);
-  vFwd *= Math.max(0, 1 - ROLL * dt);
-  vFwd = clamp(vFwd, -MAX_REV * hnd.top, MAX_FWD * hnd.top * topMult);
+  // engage reverse when asking to go back from a near-stop, else a forward gear
+  if (car.gear >= 0 && throttle < 0 && vFwd < 20) car.gear = -1;
+  else if (car.gear < 0 && (throttle > 0 || vFwd > -5)) car.gear = 0;
+
+  const ratio = car.gear < 0 ? dtrain.reverse : dtrain.gears[car.gear];
+  car.rpm = clamp(dtrain.idleRpm + wheelSpd * ratio * dtrain.finalDrive * RPM_PER_SPEED, dtrain.idleRpm, dtrain.redlineRpm);
+
+  // automatic shifting (forward gears), with a short lockout to stop hunting
+  car.shiftTimer = Math.max(0, car.shiftTimer - dt);
+  if (car.gear >= 0 && car.shiftTimer <= 0) {
+    if (car.rpm > dtrain.redlineRpm * 0.93 && car.gear < dtrain.gears.length - 1) {
+      car.gear++;
+      car.shiftTimer = 0.35;
+    } else if (car.rpm < dtrain.redlineRpm * 0.42 && car.gear > 0) {
+      car.gear--;
+      car.shiftTimer = 0.35;
+    }
+  }
+
+  const driveAccel = (torqueAt(dtrain, car.rpm) * ratio * dtrain.finalDrive * DRIVE_K * power) / dtrain.inertia;
+  if (car.gear < 0) {
+    if (throttle < 0) vFwd -= driveAccel * dt; // reversing
+  } else if (throttle > 0) {
+    vFwd += driveAccel * dt; // driving
+  } else if (throttle < 0) {
+    vFwd -= Math.sign(vFwd) * Math.min(Math.abs(vFwd), BRAKE * dt); // braking
+  } else {
+    vFwd -= Math.sign(vFwd) * Math.min(Math.abs(vFwd), ENGINE_BRAKE * dt); // coasting
+  }
+
+  // resistance sets the natural top speed (aero grows with v^2, rolling is linear)
+  vFwd -= (DRAG_K * vFwd * Math.abs(vFwd) + ROLL_K * vFwd) * dt;
+  vFwd = clamp(vFwd, -MAX_REV, MAX_FWD_CAP);
 
   // lateral grip: the tyres bite, or the handbrake lets the back slide
   vLat *= Math.exp(-(handbrake ? HANDBRAKE_GRIP : GRIP * hnd.grip) * dt);

@@ -68,20 +68,65 @@ const FOOTPRINT_TO_COLLISION = 0.771; // footprint px -> collision units (keeps 
 
 // Handling profile: multipliers on the baseline car physics (1.0 = the sedan's
 // current feel), plus a collision mass so heavier vehicles shove lighter ones.
+// A simplified drivetrain: an engine torque curve fed through a gearbox. The
+// distinct numbers per class are what make vehicles feel different — a peaky,
+// high-revving sports engine versus a torquey, low-revving truck diesel — while
+// an automatic box shifts for you (car.ts drives the model).
+export interface Drivetrain {
+  gears: number[]; // forward gear ratios (index 0 = 1st)
+  reverse: number; // reverse ratio
+  finalDrive: number;
+  idleRpm: number;
+  redlineRpm: number;
+  peakTorque: number; // flywheel torque (force units) at peakRpm
+  peakRpm: number; // rpm the torque curve peaks at
+  inertia: number; // rotational/vehicle inertia for acceleration (heavier = slower to pick up)
+}
+
 export interface Handling {
-  accel: number; // engine acceleration
-  top: number; // top speed
   turn: number; // steering authority
   grip: number; // lateral traction (low = slides, understeers)
-  mass: number; // weight for car-to-car collisions
+  mass: number; // weight for car-to-car collisions (accel inertia is on the drivetrain)
+  drivetrain: Drivetrain;
 }
 
 const HANDLING: Record<string, Handling> = {
-  normal: { accel: 1, top: 1, turn: 1, grip: 1, mass: 1 },
-  sports: { accel: 1.3, top: 1.25, turn: 1.2, grip: 1.15, mass: 0.9 },
-  compact: { accel: 1.1, top: 0.85, turn: 1.4, grip: 1.1, mass: 0.7 },
-  offroad: { accel: 0.9, top: 0.95, turn: 1.05, grip: 0.8, mass: 1.3 },
-  heavy: { accel: 0.55, top: 0.8, turn: 0.6, grip: 0.72, mass: 2.4 },
+  // balanced all-rounder: ~560 top, brisk 5-speed
+  normal: {
+    turn: 1,
+    grip: 1,
+    mass: 1,
+    drivetrain: { gears: [3.2, 2.1, 1.5, 1.15, 0.95], reverse: 3.4, finalDrive: 3.3, idleRpm: 900, redlineRpm: 6200, peakTorque: 340, peakRpm: 3800, inertia: 1.0 },
+  },
+  // light, revvy and quick: a tall high-revving 6-speed, ~670 top
+  sports: {
+    turn: 1.2,
+    grip: 1.15,
+    mass: 0.9,
+    drivetrain: { gears: [3.4, 2.5, 1.95, 1.55, 1.25, 1.0], reverse: 3.4, finalDrive: 3.4, idleRpm: 1000, redlineRpm: 7800, peakTorque: 320, peakRpm: 5400, inertia: 0.85 },
+  },
+  // tiny buzzy engine, nimble but weak; short gears, low ~450 top
+  compact: {
+    turn: 1.4,
+    grip: 1.1,
+    mass: 0.7,
+    drivetrain: { gears: [3.6, 2.2, 1.5, 1.1], reverse: 3.6, finalDrive: 4.0, idleRpm: 1000, redlineRpm: 6800, peakTorque: 160, peakRpm: 4400, inertia: 0.72 },
+  },
+  // low-end grunt, torquey launch, modest ~450 top
+  offroad: {
+    turn: 1.05,
+    grip: 0.8,
+    mass: 1.3,
+    drivetrain: { gears: [3.9, 2.4, 1.6, 1.1], reverse: 4.0, finalDrive: 3.7, idleRpm: 800, redlineRpm: 6300, peakTorque: 340, peakRpm: 2900, inertia: 1.4 },
+  },
+  // diesel truck: low-revving, a low redline and a lot of inertia — slow to build
+  // speed and slow flat out (~315), but heavy enough to barge anything aside
+  heavy: {
+    turn: 0.6,
+    grip: 0.72,
+    mass: 2.4,
+    drivetrain: { gears: [4.4, 2.7, 1.8, 1.3, 1.0], reverse: 4.5, finalDrive: 4.0, idleRpm: 600, redlineRpm: 4500, peakTorque: 360, peakRpm: 2100, inertia: 3.4 },
+  },
 };
 
 const CLASS_OF: Record<VehicleKind, keyof typeof HANDLING> = {

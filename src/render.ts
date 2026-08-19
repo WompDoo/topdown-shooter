@@ -623,9 +623,32 @@ function drawHud(ctx: CanvasRenderingContext2D, w: World, input: Input, cssW: nu
   // weapon / ammo or driving
   ctx.textAlign = 'right';
   if (driving) {
-    ctx.font = '700 22px ui-monospace, Menlo, monospace';
+    const car = w.cars[p.inCar];
+    const dt = VEHICLES[car.kind].handling.drivetrain;
+    const rpmFrac = Math.max(0, Math.min(1, (car.rpm - dt.idleRpm) / (dt.redlineRpm - dt.idleRpm)));
+    // tachometer bar with a redline zone
+    const tw = 150;
+    const th = 8;
+    const tx = cssW - 24 - tw;
+    const ty = cssH - 82;
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillRect(tx - 2, ty - 2, tw + 4, th + 4);
+    ctx.fillStyle = 'rgba(224,83,58,0.3)';
+    ctx.fillRect(tx + tw * 0.85, ty, tw * 0.15, th);
+    ctx.fillStyle = rpmFrac > 0.85 ? '#e0533a' : '#7fe3ff';
+    ctx.fillRect(tx, ty, tw * rpmFrac, th);
+    // speed readout
+    ctx.textAlign = 'right';
+    ctx.font = '600 13px ui-monospace, Menlo, monospace';
+    ctx.fillStyle = COL.hudDim;
+    ctx.fillText(`${Math.round(Math.abs(car.speed) * 0.5)} KPH`, cssW - 24, cssH - 58);
+    // gear
+    ctx.font = '600 11px ui-monospace, Menlo, monospace';
+    ctx.fillText('GEAR', cssW - 66, cssH - 26);
+    ctx.font = '800 30px ui-monospace, Menlo, monospace';
     ctx.fillStyle = COL.hud;
-    ctx.fillText('DRIVING', cssW - 24, cssH - 28);
+    ctx.fillText(car.gear < 0 ? 'R' : String(car.gear + 1), cssW - 24, cssH - 22);
+    ctx.textAlign = 'left';
   } else {
     const os = p.slot === 0 ? 1 : 0;
     ctx.font = '600 11px ui-monospace, Menlo, monospace';
