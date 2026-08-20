@@ -17,6 +17,8 @@ export interface Camera {
   zoom: number;
 }
 
+const KPH_PER_PXS = 0.44; // speedo scaling: the fastest car reads ~350 km/h
+
 const ENEMY_COL: Record<EnemyType, string> = {
   gunman: '#d3673f',
   smg: '#d6c23f',
@@ -641,7 +643,7 @@ function drawHud(ctx: CanvasRenderingContext2D, w: World, input: Input, cssW: nu
     ctx.textAlign = 'right';
     ctx.font = '600 13px ui-monospace, Menlo, monospace';
     ctx.fillStyle = COL.hudDim;
-    ctx.fillText(`${Math.round(Math.abs(car.speed) * 0.5)} KPH`, cssW - 24, cssH - 58);
+    ctx.fillText(`${Math.round(Math.abs(car.speed) * KPH_PER_PXS)} KPH`, cssW - 24, cssH - 58);
     // gear
     ctx.font = '600 11px ui-monospace, Menlo, monospace';
     ctx.fillText('GEAR', cssW - 66, cssH - 26);

@@ -15,19 +15,21 @@ import { angleDiff, clamp, collideCircleRect, collideCircleSegment, fromAngle, r
 import { addHitstop, addShake, spawnBlood, spawnDeath, spawnExplosion, spawnFire, spawnSmokePuff } from './fx';
 import { sfxEnemyDeath } from './audio';
 
-const RPM_PER_SPEED = 2.75; // engine rpm gained per (px/s) x gear x finalDrive
-const DRIVE_K = 0.17; // torque x gearing -> forward acceleration force
-const DRAG_K = 0.00022; // aero drag (grows with v^2); light — redline sets top speed
-const ROLL_K = 0.05; // rolling resistance (linear in v)
+const RPM_PER_SPEED = 2.4; // engine rpm gained per (px/s) x gear x finalDrive
+const DRIVE_K = 0.02; // torque x gearing -> forward accel; low = weighty (0-100 in ~3-4s)
+const DRAG_K = 0.00002; // aero drag (grows with v^2); tiny — redline sets a high top speed
+const ROLL_K = 0.012; // rolling resistance (linear in v)
+const POWER_GRIP_REF = 130; // accel that fully loads the tyres for the power-oversteer circle
 const BRAKE = 900; // braking deceleration (throttle held against motion)
 const ENGINE_BRAKE = 190; // coast-down deceleration off throttle
 const MAX_FWD_CAP = 1000; // safety clamp; drag limits real speed well below this
 const MAX_REV = 220; // reverse speed cap
 const TURN_RATE = 3.0; // rad/s of steering authority at speed
 const HB_TURN = 1.7; // extra steering authority with the handbrake pulled
-const GRIP = 9.0; // lateral traction — high = tyres bite, tight cornering
-const HANDBRAKE_GRIP = 1.0; // lateral traction while sliding — low = long drift
+const GRIP_ACCEL = 1150; // base lateral grip: px/s^2 the tyres hold before sliding
+const HANDBRAKE_GRIP_ACCEL = 150; // grip with the handbrake pulled — low = long drifts
 const STEER_SPEED_REF = 120; // speed for full steering authority
+const STEER_HISPEED = 300; // above this speed steering authority tapers for stability
 const SKID_MIN = 55; // lateral speed above which the tyres leave marks
 const WALL_BOUNCE = 0.15; // restitution off walls (0 = dead stop, 1 = full bounce)
 const WALL_SCRUB = 0.08; // tangential speed lost per wall contact (scrape friction)
@@ -92,8 +94,9 @@ export function updateCar(w: World, car: Car, input: Input, dt: number): void {
   const travel = car.vel.x * pre.x + car.vel.y * pre.y;
   const speed = Math.hypot(car.vel.x, car.vel.y);
   const speedFactor = clamp(speed / STEER_SPEED_REF, 0, 1);
+  const hiSpeed = clamp(1 - (speed - STEER_HISPEED) / 900, 0.5, 1); // calmer wheel at speed
   const dir = travel < -1 ? -1 : 1;
-  car.angle += steer * TURN_RATE * hnd.turn * (handbrake ? HB_TURN : 1) * speedFactor * dir * dt;
+  car.angle += steer * TURN_RATE * hnd.turn * (handbrake ? HB_TURN : 1) * speedFactor * hiSpeed * dir * dt;
 
   // Decompose velocity onto the NEW heading (same basis for de/recompose keeps
   // the momentum in world space — the car can point one way and slide another).
@@ -108,7 +111,7 @@ export function updateCar(w: World, car: Car, input: Input, dt: number): void {
   const dtrain = hnd.drivetrain;
   const frac = car.hp / car.maxHp;
   const wear = clamp((0.6 - frac) / 0.6, 0, 1);
-  const power = 1 - 0.32 * wear;
+  const wearMul = 1 - 0.32 * wear;
   const wheelSpd = Math.abs(vFwd);
 
   // engage reverse when asking to go back from a near-stop, else a forward gear
@@ -130,7 +133,7 @@ export function updateCar(w: World, car: Car, input: Input, dt: number): void {
     }
   }
 
-  const driveAccel = (torqueAt(dtrain, car.rpm) * ratio * dtrain.finalDrive * DRIVE_K * power) / dtrain.inertia;
+  const driveAccel = (torqueAt(dtrain, car.rpm) * ratio * dtrain.finalDrive * DRIVE_K * wearMul * hnd.power) / dtrain.inertia;
   if (car.gear < 0) {
     if (throttle < 0) vFwd -= driveAccel * dt; // reversing
   } else if (throttle > 0) {
@@ -145,8 +148,14 @@ export function updateCar(w: World, car: Car, input: Input, dt: number): void {
   vFwd -= (DRAG_K * vFwd * Math.abs(vFwd) + ROLL_K * vFwd) * dt;
   vFwd = clamp(vFwd, -MAX_REV, MAX_FWD_CAP);
 
-  // lateral grip: the tyres bite, or the handbrake lets the back slide
-  vLat *= Math.exp(-(handbrake ? HANDBRAKE_GRIP : GRIP * hnd.grip) * dt);
+  // Tyre grip as a friction circle: accelerating hard uses up grip that's then
+  // unavailable for cornering (power-on oversteer, scaled by the car's balance);
+  // the tyres only hold so much lateral before they let go and the car slides.
+  const throttleLoad = throttle > 0 ? clamp(driveAccel / POWER_GRIP_REF, 0, 1) : 0;
+  const gripLoss = clamp(throttleLoad * hnd.balance, 0, 0.85);
+  const latGrip = handbrake ? HANDBRAKE_GRIP_ACCEL : GRIP_ACCEL * hnd.grip * (1 - gripLoss);
+  const kill = Math.min(Math.abs(vLat), latGrip * dt);
+  vLat -= Math.sign(vLat) * kill;
 
   car.vel = { x: fwd.x * vFwd + right.x * vLat, y: fwd.y * vFwd + right.y * vLat };
   car.speed = vFwd;
