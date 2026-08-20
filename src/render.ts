@@ -595,9 +595,22 @@ function drawHud(ctx: CanvasRenderingContext2D, w: World, input: Input, cssW: nu
   const p = w.player;
   const driving = p.inCar >= 0;
 
+  // ADS scope vignette — stronger for high-zoom weapons (the sniper)
+  if (!driving && p.ads > 0.01) {
+    const amount = p.ads * Math.max(0.3, Math.min(1, (p.weapon.adsZoom - 1) / 0.75));
+    const cx = cssW / 2;
+    const cy = cssH / 2;
+    const grd = ctx.createRadialGradient(cx, cy, Math.min(cssW, cssH) * 0.22, cx, cy, Math.max(cssW, cssH) * 0.62);
+    grd.addColorStop(0, 'rgba(0,0,0,0)');
+    grd.addColorStop(1, `rgba(2,3,5,${0.8 * amount})`);
+    ctx.fillStyle = grd;
+    ctx.fillRect(0, 0, cssW, cssH);
+  }
+
   // reticle
   if (!driving) {
-    const gap = Math.min(46, 6 + (p.weapon.kind === 'melee' ? 0.02 : p.spread) * 220);
+    const eff = p.weapon.kind === 'melee' ? 0.02 : p.spread * (1 + (p.weapon.adsSpreadMult - 1) * p.ads);
+    const gap = Math.min(46, 6 + eff * 220);
     const mx = input.mouse.x;
     const my = input.mouse.y;
     ctx.strokeStyle = p.reloading ? 'rgba(255,120,90,0.9)' : 'rgba(230,245,255,0.9)';
@@ -702,7 +715,7 @@ function drawHud(ctx: CanvasRenderingContext2D, w: World, input: Input, cssW: nu
   ctx.fillText(
     driving
       ? 'WASD drive   ·   SPACE handbrake   ·   F exit'
-      : 'WASD move   ·   LMB fire   ·   1·2 swap   ·   R reload   ·   F enter car',
+      : 'WASD move   ·   LMB fire   ·   RMB aim   ·   1·2 swap   ·   R reload   ·   F enter car',
     24,
     cssH - 12,
   );

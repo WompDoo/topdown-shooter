@@ -19,7 +19,9 @@ export const GRIP_FWD = 6; // world px the sprite's rear sits ahead of the entit
 // Keyed by weapon name (unique across the roster).
 const ART: Record<string, WeaponArt> = {
   Sidearm: { sx: 48, sy: 144, sw: 14, sh: 7 },
+  'Vector SMG': { sx: 96, sy: 144, sw: 25, sh: 12 },
   'MK-7 Carbine': { sx: 288, sy: 0, sw: 33, sh: 11 },
+  'M60 HMG': { sx: 288, sy: 168, sw: 45, sh: 11 },
   Breacher: { sx: 144, sy: 24, sw: 39, sh: 9 },
   Longshot: { sx: 240, sy: 144, sw: 45, sh: 13 },
   'Combat Knife': { sx: 48, sy: 216, sw: 8, sh: 7 },

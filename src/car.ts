@@ -547,6 +547,17 @@ export function nearestCarIndex(w: World, reach: number = ENTER_REACH): number {
 
 export const AUTO_PATH_RANGE = 260; // press F within this to auto-walk to a car
 
+// The driver's door in world space — front-left of the car. The player walks
+// here before boarding rather than teleporting into the middle of the car.
+export function driverDoor(car: Car): Vec2 {
+  const fwd = fromAngle(car.angle);
+  const left = { x: fwd.y, y: -fwd.x };
+  return {
+    x: car.pos.x + fwd.x * car.w * 0.08 + left.x * (car.h * 0.55 + 6),
+    y: car.pos.y + fwd.y * car.w * 0.08 + left.y * (car.h * 0.55 + 6),
+  };
+}
+
 export function enterCar(w: World, idx: number): void {
   const car = w.cars[idx];
   car.occupant = 'player';

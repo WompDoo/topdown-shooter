@@ -11,10 +11,12 @@ import {
   ENEMY_SHOTGUN,
   ENEMY_SMG,
   ENEMY_SNIPER,
+  HMG,
   KNIFE,
   PISTOL,
   RIFLE,
   SHOTGUN,
+  SMG,
   SNIPER,
 } from './weapon';
 
@@ -46,6 +48,7 @@ export interface Player {
   muzzleTimer: number;
   swing: number;
   flash: number;
+  ads: number; // 0..1 aim-down-sights amount (smoothed)
   downed: boolean;
   inCar: number; // index into world.cars, or -1 on foot
   walkTo: number; // car index the player is auto-walking to enter, or -1
@@ -260,6 +263,7 @@ function makePlayer(pos: Vec2, loadout: Loadout): Player {
     muzzleTimer: 0,
     swing: 0,
     flash: 0,
+    ads: 0,
     downed: false,
     inCar: -1,
     walkTo: -1,
@@ -536,7 +540,7 @@ export function buildWorld(loadout: Loadout): World {
       fi++;
     }
   // a rack with one of every weapon, laid out in a row along the top of the lot
-  const rack: Weapon[] = [PISTOL, RIFLE, SHOTGUN, SNIPER, KNIFE];
+  const rack: Weapon[] = [PISTOL, SMG, RIFLE, HMG, SHOTGUN, SNIPER, KNIFE];
   const pickups: Pickup[] = rack.map((wpn, i) => makePickup(v(2760 + i * 210, 2520), wpn));
   // target dummies at the far side for weapon testing
   enemySpots.push([4600, 2900, 'gunman'], [4600, 3300, 'brute'], [4300, 3720, 'smg'], [4650, 3720, 'marksman']);

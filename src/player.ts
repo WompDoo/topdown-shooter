@@ -6,7 +6,7 @@ import type { Input } from './input';
 import type { Player, World } from './world';
 import type { Vec2 } from './math';
 import type { Weapon } from './weapon';
-import { enterCar } from './car';
+import { driverDoor, enterCar } from './car';
 import { add, angleOf, approach, clamp, collideCircleSegment, fromAngle, len, randSpread, resolveCircleRect, scale, sub } from './math';
 import { fireInterval } from './weapon';
 import { barrelDist } from './weaponart';
@@ -62,6 +62,7 @@ function updateDive(w: World, p: Player, dt: number): void {
     p.roll = 0;
   }
   p.flash = Math.max(0, p.flash - dt);
+  p.ads = Math.max(0, p.ads - dt * 6);
 }
 
 export function swapWeapon(p: Player, next: number): void {
@@ -101,6 +102,7 @@ export function updatePlayer(w: World, input: Input, aimWorld: Vec2, dt: number)
   if (p.downed) {
     p.flash = Math.max(0, p.flash - dt);
     p.swing = Math.max(0, p.swing - dt);
+    p.ads = 0;
     return;
   }
 
@@ -117,6 +119,11 @@ export function updatePlayer(w: World, input: Input, aimWorld: Vec2, dt: number)
   p.aim = angleOf(sub(aimWorld, p.pos));
   const aimDir = fromAngle(p.aim);
 
+  // Aim down sights (hold right mouse): zoom (camera, in main), a tighter cone
+  // and slower walk. Guns only; smoothed so it eases in and out.
+  const wantAds = input.rightDown && !isMelee;
+  p.ads = approach(p.ads, wantAds ? 1 : 0, dt * 8);
+
   // --- Move ---
   let ix = 0;
   let iy = 0;
@@ -132,10 +139,11 @@ export function updatePlayer(w: World, input: Input, aimWorld: Vec2, dt: number)
     if (ix !== 0 || iy !== 0 || !car || car.dead) {
       p.walkTo = -1;
     } else {
-      const dx = car.pos.x - p.pos.x;
-      const dy = car.pos.y - p.pos.y;
+      const door = driverDoor(car);
+      const dx = door.x - p.pos.x;
+      const dy = door.y - p.pos.y;
       const d = Math.hypot(dx, dy);
-      if (d <= p.radius + car.radius + 10) {
+      if (d <= p.radius + 8) {
         enterCar(w, p.walkTo);
         p.walkTo = -1;
         return;
@@ -147,8 +155,9 @@ export function updatePlayer(w: World, input: Input, aimWorld: Vec2, dt: number)
 
   const moveLen = Math.hypot(ix, iy);
   const move: Vec2 = moveLen > 0 ? { x: ix / moveLen, y: iy / moveLen } : { x: 0, y: 0 };
-  const sprinting = input.isDown('ShiftLeft') || input.isDown('ShiftRight');
-  p.vel = scale(move, MOVE_SPEED * (sprinting ? SPRINT_MULT : 1));
+  const sprinting = (input.isDown('ShiftLeft') || input.isDown('ShiftRight')) && p.ads < 0.5;
+  const adsMove = 1 + (wpn.adsMoveMult - 1) * p.ads;
+  p.vel = scale(move, MOVE_SPEED * (sprinting ? SPRINT_MULT : 1) * adsMove);
   if (isMelee && p.swing > 0) {
     const l = wpn.lunge * (p.swing / wpn.swingTime);
     p.vel.x += aimDir.x * l;
@@ -194,7 +203,7 @@ export function updatePlayer(w: World, input: Input, aimWorld: Vec2, dt: number)
   } else {
     const shootOrigin = add(p.pos, scale(aimDir, barrelDist(wpn, p.radius)));
     if (canFire && p.fireTimer <= 0) {
-      const cone = Math.min(p.spread, wpn.spreadMax);
+      const cone = Math.min(p.spread, wpn.spreadMax) * (1 + (wpn.adsSpreadMult - 1) * p.ads);
       const pellets = Math.max(1, wpn.pellets);
       for (let i = 0; i < pellets; i++) {
         resolveShot(w, shootOrigin, p.aim + randSpread(cone), wpn.damage, wpn.range, 'player', wpn.knockback);

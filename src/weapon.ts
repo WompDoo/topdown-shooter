@@ -135,6 +135,52 @@ export const SNIPER: Weapon = {
   adsSpreadMult: 0.05, // pinpoint when scoped
 };
 
+export const SMG: Weapon = {
+  ...GUN,
+  name: 'Vector SMG',
+  sound: 'pistol',
+  auto: true,
+  rpm: 900,
+  damage: 14,
+  spreadMin: 0.05,
+  spreadMax: 0.19,
+  spreadPerShot: 0.02,
+  spreadRecover: 1.5,
+  mag: 32,
+  reloadTime: 1.6,
+  range: 620,
+  knockback: 45,
+  recoilKick: 0.035,
+  shake: 1.6,
+  muzzleSize: 15,
+  adsZoom: 1.22,
+  adsMoveMult: 0.62,
+  adsSpreadMult: 0.5,
+};
+
+export const HMG: Weapon = {
+  ...GUN,
+  name: 'M60 HMG',
+  sound: 'rifle',
+  auto: true,
+  rpm: 600,
+  damage: 34,
+  spreadMin: 0.03,
+  spreadMax: 0.26,
+  spreadPerShot: 0.03,
+  spreadRecover: 0.8,
+  mag: 100,
+  reloadTime: 4.5,
+  range: 1000,
+  knockback: 120,
+  recoilKick: 0.06,
+  shake: 3.2,
+  muzzleSize: 26,
+  adsZoom: 1.18,
+  adsMoveMult: 0.4, // heavy: you slow right down behind it
+  adsSpreadMult: 0.55,
+};
+
 export const KNIFE: Weapon = {
   ...GUN,
   kind: 'melee',
@@ -163,7 +209,7 @@ export const KNIFE: Weapon = {
   swingTime: 0.34,
 };
 
-export const PLAYER_WEAPONS: Weapon[] = [PISTOL, RIFLE, SHOTGUN, SNIPER, KNIFE];
+export const PLAYER_WEAPONS: Weapon[] = [PISTOL, SMG, RIFLE, HMG, SHOTGUN, SNIPER, KNIFE];
 
 // --- Enemy weapons ---
 

@@ -10,8 +10,6 @@ import { updateFx } from './fx';
 import {
   AUTO_PATH_RANGE,
   carEffects,
-  ENTER_REACH,
-  enterCar,
   exitCar,
   nearestCarIndex,
   resolveCarCollisions,
@@ -78,12 +76,7 @@ function fixedUpdate(dt: number): void {
       updatePlayer(w, input, screenToWorld(input.mouse.x, input.mouse.y), dt);
       if (input.pressed('KeyF') && p.enterTimer <= 0 && p.dive <= 0) {
         const idx = nearestCarIndex(w, AUTO_PATH_RANGE);
-        if (idx >= 0) {
-          const car = w.cars[idx];
-          const d = Math.hypot(car.pos.x - p.pos.x, car.pos.y - p.pos.y);
-          if (d <= p.radius + ENTER_REACH) enterCar(w, idx);
-          else p.walkTo = idx;
-        }
+        if (idx >= 0) p.walkTo = idx; // walk to the driver door, then board
       }
     }
     // Abandoned / bumped cars keep their momentum and coast on their own.
@@ -121,6 +114,9 @@ function updateCamera(dt: number): void {
   const p = world.player;
   const car = p.inCar >= 0 ? world.cars[p.inCar] : null;
   const focus = car ? car.pos : p.pos;
+  // Aiming down sights zooms the camera in (on foot, guns only).
+  const targetZoom = car ? BASE_ZOOM : BASE_ZOOM * (1 + (p.weapon.adsZoom - 1) * p.ads);
+  cam.zoom = lerp(cam.zoom, targetZoom, 1 - Math.exp(-9 * dt));
   let leadX: number;
   let leadY: number;
   if (car) {
