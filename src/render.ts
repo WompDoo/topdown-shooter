@@ -692,6 +692,24 @@ function drawHud(ctx: CanvasRenderingContext2D, w: World, input: Input, cssW: nu
     ctx.stroke();
   }
 
+  // Grenade cook/throw meter: fills toward the max-distance tick, then flashes
+  // red as it overcooks toward going off in your hand.
+  if (!driving && p.weapon.thrown && p.charge > 0.01) {
+    const fuse = p.weapon.projFuse ?? 2;
+    const frac = Math.min(1, p.charge / fuse);
+    const bw = 56;
+    const bh = 6;
+    const bx = input.mouse.x - bw / 2;
+    const by = input.mouse.y + 26;
+    ctx.fillStyle = 'rgba(0,0,0,0.6)';
+    ctx.fillRect(bx - 2, by - 2, bw + 4, bh + 4);
+    const danger = frac > 0.72;
+    ctx.fillStyle = danger ? (Math.floor(w.time * 14) % 2 ? '#ff3a1a' : '#ffca3a') : '#7fe3ff';
+    ctx.fillRect(bx, by, bw * frac, bh);
+    ctx.fillStyle = 'rgba(230,245,255,0.85)'; // max-distance tick (~46% of the fuse)
+    ctx.fillRect(bx + bw * 0.46, by - 2, 2, bh + 4);
+  }
+
   ctx.textBaseline = 'alphabetic';
   // health
   const hb = { x: 24, y: cssH - 40, w: 240, h: 16 };

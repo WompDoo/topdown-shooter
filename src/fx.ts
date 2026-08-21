@@ -97,6 +97,27 @@ export function spawnFire(w: World, pos: Vec2): void {
   });
 }
 
+// A jet of flame from a flamethrower: fire particles flung forward in a tight
+// cone that burn out around `range`, so the visible stream matches the hit cone.
+export function spawnFlameJet(w: World, origin: Vec2, aim: number, range: number, arcHalf: number): void {
+  for (let i = 0; i < 5; i++) {
+    const a = aim + randSpread(arcHalf * 1.4);
+    const sp = randRange(range * 2.4, range * 3.3); // fast + low drag so the stream reaches the cone
+    w.particles.push({
+      pos: { x: origin.x + randSpread(3), y: origin.y + randSpread(3) },
+      vel: fromAngle(a, sp),
+      life: randRange(0.18, 0.42),
+      maxLife: 0.42,
+      size: randRange(6, 14),
+      color: rand() < 0.5 ? '#ffca3a' : rand() < 0.6 ? '#ff7a1e' : '#ff4d1a',
+      drag: 1.5,
+      kind: 'fire',
+      angle: 0,
+      spin: 0,
+    });
+  }
+}
+
 export function spawnExplosion(w: World, pos: Vec2, scale = 1): void {
   addShake(w, Math.min(16, 12 * scale));
   addHitstop(w, 0.09);

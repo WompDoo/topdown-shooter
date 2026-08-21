@@ -36,6 +36,11 @@ export interface Weapon {
   blastRadius?: number;
   projSpeed?: number; // launch speed (px/s)
   projFuse?: number; // seconds until it auto-detonates
+  thrown?: boolean; // hand-thrown: hold to charge distance, cooks off if held too long
+  // flame weapons (optional): a short continuous cone of fire, no hitscan/projectile
+  flame?: boolean;
+  flameRange?: number; // reach of the flame cone (px)
+  flameArc?: number; // half-angle of the cone (radians)
 }
 
 const GUN = {
@@ -209,8 +214,9 @@ export const GRENADE: Weapon = {
   adsSpreadMult: 0.5,
   projectile: 'grenade',
   blastRadius: 130,
-  projSpeed: 360,
-  projFuse: 1.5,
+  projSpeed: 360, // base lob; the real launch speed scales with how long you cook it
+  projFuse: 2.4, // cook time: hold past this and it goes off in your hand
+  thrown: true,
 };
 
 export const GRENADE_LAUNCHER: Weapon = {
@@ -267,6 +273,32 @@ export const ROCKET_LAUNCHER: Weapon = {
   projFuse: 3,
 };
 
+export const FLAMETHROWER: Weapon = {
+  ...GUN,
+  name: 'Flamethrower',
+  sound: 'shotgun',
+  auto: true,
+  rpm: 1000, // ticks/min; a fast, continuous stream of flame
+  damage: 6, // per tick, close range — high DPS but drops off fast with distance
+  spreadMin: 0.05,
+  spreadMax: 0.05,
+  spreadPerShot: 0,
+  spreadRecover: 1,
+  mag: 120, // fuel
+  reloadTime: 3,
+  range: 300,
+  knockback: 12,
+  recoilKick: 0.01,
+  shake: 0.6,
+  muzzleSize: 0,
+  adsZoom: 1.1,
+  adsMoveMult: 0.7,
+  adsSpreadMult: 1,
+  flame: true,
+  flameRange: 300,
+  flameArc: 0.32,
+};
+
 export const KNIFE: Weapon = {
   ...GUN,
   kind: 'melee',
@@ -296,7 +328,7 @@ export const KNIFE: Weapon = {
 };
 
 export const PLAYER_WEAPONS: Weapon[] = [
-  PISTOL, SMG, RIFLE, HMG, SHOTGUN, SNIPER, GRENADE, GRENADE_LAUNCHER, ROCKET_LAUNCHER, KNIFE,
+  PISTOL, SMG, RIFLE, HMG, SHOTGUN, SNIPER, GRENADE, GRENADE_LAUNCHER, ROCKET_LAUNCHER, FLAMETHROWER, KNIFE,
 ];
 
 // --- Enemy weapons ---

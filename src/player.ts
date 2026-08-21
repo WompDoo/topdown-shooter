@@ -10,14 +10,19 @@ import { driverDoor, enterCar } from './car';
 import { add, angleOf, approach, clamp, collideCircleSegment, fromAngle, len, randSpread, resolveCircleRect, scale, sub } from './math';
 import { fireInterval } from './weapon';
 import { barrelDist } from './weaponart';
-import { meleeHit, resolveShot } from './combat';
+import { flameHit, meleeHit, resolveShot } from './combat';
 import { spawnProjectile } from './projectile';
-import { addShake, spawnCasing, spawnMuzzle, spawnSlash } from './fx';
+import { addShake, spawnCasing, spawnFlameJet, spawnMuzzle, spawnSlash } from './fx';
 import { sfxDryFire, sfxReload, sfxWeapon } from './audio';
 
 const MOVE_SPEED = 205;
 const SPRINT_MULT = 1.6; // speed boost while holding Shift on foot
 const DIVE_DRAG = 3.2; // ground friction while tumbling out of a car
+
+// Hand-grenade throw charge: hold to wind up a longer throw (and cook the fuse).
+const GRENADE_CHARGE_TIME = 1.1; // seconds of hold to reach the max throw
+const GRENADE_MIN_THROW = 230; // launch speed on a quick tap (px/s)
+const GRENADE_MAX_THROW = 560; // launch speed at full charge (~70% of the launcher's reach)
 
 // Push the player out of walls and cars, then clamp to the world.
 function resolveFoot(w: World, p: Player): void {
@@ -76,6 +81,7 @@ export function swapWeapon(p: Player, next: number): void {
   p.reloadTimer = 0;
   p.fireTimer = Math.max(p.fireTimer, 0.12);
   p.spread = p.weapon.spreadMin;
+  p.charge = 0;
 }
 
 // Equip a weapon grabbed off the ground into the active slot, topped up.
@@ -88,6 +94,7 @@ export function equipWeapon(p: Player, weapon: Weapon): void {
   p.reloadTimer = 0;
   p.fireTimer = Math.max(p.fireTimer, 0.12);
   p.spread = weapon.spreadMin;
+  p.charge = 0;
 }
 
 function startReload(p: Player): void {
@@ -203,7 +210,53 @@ export function updatePlayer(w: World, input: Input, aimWorld: Vec2, dt: number)
     }
   } else {
     const shootOrigin = add(p.pos, scale(aimDir, barrelDist(wpn, p.radius)));
-    if (canFire && p.fireTimer <= 0) {
+    if (wpn.thrown) {
+      // Hand grenade: hold to cook the fuse + wind up the throw, release to lob.
+      // Charge maps to distance; hold past the fuse and it goes off in your hand.
+      const canThrow = !p.reloading && p.ammo > 0 && w.state === 'playing';
+      if (heldFire && canThrow && p.fireTimer <= 0) {
+        p.charge += dt;
+        if (p.charge >= (wpn.projFuse ?? 2)) {
+          // cooked too long — detonate on the spot (spawn a live, still grenade)
+          spawnProjectile(w, { x: p.pos.x, y: p.pos.y }, p.aim, wpn, 'player', { speed: 0, fuse: 0 });
+          p.ammo -= 1;
+          p.charge = 0;
+          p.fireTimer = 0.5;
+          if (p.ammo <= 0) startReload(p);
+        }
+      } else if (p.charge > 0) {
+        if (canThrow) {
+          const frac = Math.min(1, p.charge / GRENADE_CHARGE_TIME);
+          const speed = GRENADE_MIN_THROW + (GRENADE_MAX_THROW - GRENADE_MIN_THROW) * frac;
+          const fuse = Math.max(0.35, (wpn.projFuse ?? 2) - p.charge); // keeps cooking in the air
+          spawnProjectile(w, shootOrigin, p.aim, wpn, 'player', { speed, fuse });
+          p.ammo -= 1;
+          p.fireTimer = 0.4;
+          p.aimKick = Math.min(p.aimKick + wpn.recoilKick, 0.6);
+          sfxWeapon(wpn.sound);
+          if (p.ammo <= 0) startReload(p);
+        }
+        p.charge = 0;
+      }
+    } else if (wpn.flame) {
+      // Flamethrower: a continuous cone of fire while held — no hitscan or casings.
+      if (canFire && p.fireTimer <= 0) {
+        const range = wpn.flameRange ?? 300;
+        const arc = wpn.flameArc ?? 0.3;
+        flameHit(w, shootOrigin, p.aim, range, arc, wpn.damage);
+        spawnFlameJet(w, shootOrigin, p.aim, range, arc);
+        p.ammo -= 1;
+        p.muzzleTimer = 0.05;
+        addShake(w, wpn.shake);
+        if (Math.random() < 0.2) sfxWeapon(wpn.sound); // an intermittent hiss, not a rattle
+        p.fireTimer = fireInterval(wpn);
+        fired = true;
+        if (p.ammo <= 0) startReload(p);
+      } else if (heldFire && p.ammo <= 0 && !p.reloading && p.fireTimer <= 0) {
+        startReload(p);
+        p.fireTimer = 0.25;
+      }
+    } else if (canFire && p.fireTimer <= 0) {
       const cone = Math.min(p.spread, wpn.spreadMax) * (1 + (wpn.adsSpreadMult - 1) * p.ads);
       if (wpn.projectile) {
         // lob / launch an explosive instead of a hitscan shot

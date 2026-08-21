@@ -11,6 +11,7 @@ import {
   ENEMY_SHOTGUN,
   ENEMY_SMG,
   ENEMY_SNIPER,
+  FLAMETHROWER,
   GRENADE,
   GRENADE_LAUNCHER,
   HMG,
@@ -52,6 +53,7 @@ export interface Player {
   swing: number;
   flash: number;
   ads: number; // 0..1 aim-down-sights amount (smoothed)
+  charge: number; // seconds a thrown weapon (grenade) has been held/cooking
   downed: boolean;
   inCar: number; // index into world.cars, or -1 on foot
   walkTo: number; // car index the player is auto-walking to enter, or -1
@@ -283,6 +285,7 @@ function makePlayer(pos: Vec2, loadout: Loadout): Player {
     swing: 0,
     flash: 0,
     ads: 0,
+    charge: 0,
     downed: false,
     inCar: -1,
     walkTo: -1,
@@ -560,9 +563,9 @@ export function buildWorld(loadout: Loadout): World {
     }
   // a rack with one of every weapon, laid out in a row along the top of the lot
   const rack: Weapon[] = [
-    PISTOL, SMG, RIFLE, HMG, GRENADE, GRENADE_LAUNCHER, ROCKET_LAUNCHER, SHOTGUN, SNIPER, KNIFE,
+    PISTOL, SMG, RIFLE, HMG, GRENADE, GRENADE_LAUNCHER, ROCKET_LAUNCHER, FLAMETHROWER, SHOTGUN, SNIPER, KNIFE,
   ];
-  const pickups: Pickup[] = rack.map((wpn, i) => makePickup(v(2760 + i * 200, 2520), wpn));
+  const pickups: Pickup[] = rack.map((wpn, i) => makePickup(v(2760 + i * 185, 2520), wpn));
   // target dummies at the far side for weapon testing
   enemySpots.push([4600, 2900, 'gunman'], [4600, 3300, 'brute'], [4300, 3720, 'smg'], [4650, 3720, 'marksman']);
 

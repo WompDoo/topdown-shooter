@@ -212,3 +212,54 @@ export function meleeHit(
     }
   }
 }
+
+// Flamethrower tick: scorch every hostile, civilian and car inside the short
+// cone in front of the player. Damage is strongest up close and tapers toward
+// the tip of the flame. Called every fire tick while the trigger is held.
+export function flameHit(
+  w: World,
+  origin: Vec2,
+  aim: number,
+  range: number,
+  arcHalf: number,
+  dmg: number,
+): void {
+  const scorch = (px: number, py: number, radius: number): number => {
+    const dx = px - origin.x;
+    const dy = py - origin.y;
+    const d = Math.hypot(dx, dy);
+    if (d > range + radius) return 0;
+    if (d > 1e-3 && Math.abs(angleDiff(aim, angleOf({ x: dx, y: dy }))) > arcHalf) return 0;
+    return dmg * (1 - Math.min(1, d / (range + radius)) * 0.6);
+  };
+  for (const e of w.enemies) {
+    if (!e.alive) continue;
+    const s = scorch(e.pos.x, e.pos.y, e.radius);
+    if (s <= 0) continue;
+    e.hp -= s;
+    e.aggro = AGGRO_TIME;
+    e.flash = 0.05;
+    if (e.hp <= 0 && e.alive) {
+      e.alive = false;
+      spawnDeath(w, e.pos, aim);
+      sfxEnemyDeath();
+    }
+  }
+  for (const c of w.civilians) {
+    if (!c.alive) continue;
+    const s = scorch(c.pos.x, c.pos.y, c.radius);
+    if (s <= 0) continue;
+    c.hp -= s;
+    c.panic = Math.max(c.panic, 3);
+    c.fleeFrom = { x: origin.x, y: origin.y };
+    if (c.hp <= 0 && c.alive) {
+      c.alive = false;
+      spawnDeath(w, c.pos, aim);
+      sfxEnemyDeath();
+    }
+  }
+  for (const c of w.cars) {
+    const s = scorch(c.pos.x, c.pos.y, c.radius);
+    if (s > 0) damageCar(w, c, s);
+  }
+}

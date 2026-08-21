@@ -13,17 +13,27 @@ import { damageCar } from './car';
 
 const GRENADE_DRAG = 1.1; // how fast a grenade slides to a stop
 const BOUNCE = 0.45; // grenade restitution off walls
+const EXPLOSIVE_CAR_MULT = 5; // blasts ignore the panel weakspots and hit cars far harder
 
-export function spawnProjectile(w: World, origin: Vec2, angle: number, weapon: Weapon, team: Team): void {
+// `opts` lets a thrown grenade override the launch speed (charged throw) and the
+// remaining fuse (time already cooked in the hand).
+export function spawnProjectile(
+  w: World,
+  origin: Vec2,
+  angle: number,
+  weapon: Weapon,
+  team: Team,
+  opts?: { speed?: number; fuse?: number },
+): void {
   const dir = fromAngle(angle);
-  const speed = weapon.projSpeed ?? 600;
   const rocket = weapon.projectile === 'rocket';
+  const speed = opts?.speed ?? weapon.projSpeed ?? 600;
   w.projectiles.push({
     pos: { x: origin.x, y: origin.y },
     vel: { x: dir.x * speed, y: dir.y * speed },
     kind: rocket ? 'rocket' : 'grenade',
     team,
-    fuse: weapon.projFuse ?? 2,
+    fuse: opts?.fuse ?? weapon.projFuse ?? 2,
     radius: rocket ? 6 : 5,
     blastR: weapon.blastRadius ?? 140,
     dmg: weapon.damage,
@@ -164,6 +174,6 @@ function blast(w: World, pr: Projectile): void {
   }
   for (const c of w.cars) {
     const dmg = dmgAt(c.pos.x, c.pos.y, c.radius);
-    if (dmg > 0) damageCar(w, c, dmg);
+    if (dmg > 0) damageCar(w, c, dmg * EXPLOSIVE_CAR_MULT); // a direct RPG ~one-shots a car
   }
 }
