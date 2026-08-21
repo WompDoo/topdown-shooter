@@ -2,12 +2,12 @@
 // instant ray that stops at the nearest building, car, or body. Getting shot (or
 // a round snapping past) makes nearby hostiles turn on the player.
 
-import type { Car, Enemy, World } from './world';
+import type { Car, Civilian, Enemy, World } from './world';
 import type { Vec2 } from './math';
 import { add, angleDiff, angleOf, clamp, fromAngle, len, rayVsCircle, rayVsRect, scale, sub } from './math';
 import { addHitstop, addShake, spawnBlood, spawnDeath, spawnSparks, spawnTracer } from './fx';
 import { sfxEnemyDeath, sfxImpactFlesh, sfxImpactWall, sfxPlayerHurt } from './audio';
-import { damageCar } from './car';
+import { bulletDamageMultiplier, damageCar } from './car';
 
 export const AGGRO_TIME = 9; // seconds a hostile keeps hunting after being provoked
 
@@ -36,6 +36,16 @@ function aggroAlong(w: World, a: Vec2, b: Vec2): void {
   }
 }
 
+// A round cracking past sends any civilian near its path bolting from the shooter.
+function scareCivilians(w: World, a: Vec2, b: Vec2): void {
+  for (const c of w.civilians) {
+    if (c.alive && segDist(c.pos, a, b) < 150) {
+      c.panic = Math.max(c.panic, 2.6);
+      c.fleeFrom = { x: a.x, y: a.y };
+    }
+  }
+}
+
 export function resolveShot(
   w: World,
   origin: Vec2,
@@ -48,6 +58,7 @@ export function resolveShot(
   const dir = fromAngle(angle);
   let best = range;
   let hitEnemy: Enemy | null = null;
+  let hitCiv: Civilian | null = null;
   let hitCar: Car | null = null;
   let hitPlayer = false;
   let hitSolid = false;
@@ -97,6 +108,20 @@ export function resolveShot(
     }
   }
 
+  // Civilians are neutral flesh — either side's rounds can catch them.
+  for (const c of w.civilians) {
+    if (!c.alive) continue;
+    const t = rayVsCircle(origin, dir, best, c.pos, c.radius);
+    if (t < best) {
+      best = t;
+      hitCiv = c;
+      hitEnemy = null;
+      hitCar = null;
+      hitPlayer = false;
+      hitSolid = false;
+    }
+  }
+
   const end = add(origin, scale(dir, best));
   spawnTracer(w, origin, end, team);
 
@@ -131,15 +156,30 @@ export function resolveShot(
       addShake(w, 8);
     }
   } else if (hitCar) {
-    damageCar(w, hitCar, dmg);
+    damageCar(w, hitCar, dmg * bulletDamageMultiplier(hitCar, end));
     spawnSparks(w, end, angle, 5);
     sfxImpactWall();
+  } else if (hitCiv) {
+    hitCiv.hp -= dmg;
+    hitCiv.flash = 0.09;
+    hitCiv.panic = Math.max(hitCiv.panic, 3);
+    hitCiv.fleeFrom = { x: origin.x, y: origin.y };
+    hitCiv.vel = add(hitCiv.vel, scale(dir, knockback));
+    spawnBlood(w, end, angle, 8);
+    sfxImpactFlesh();
+    if (hitCiv.hp <= 0 && hitCiv.alive) {
+      hitCiv.alive = false;
+      spawnDeath(w, hitCiv.pos, angle);
+      sfxEnemyDeath();
+      addHitstop(w, 0.03);
+    }
   } else if (hitSolid) {
     spawnSparks(w, end, angle, 7);
     sfxImpactWall();
   }
 
   if (team === 'player') aggroAlong(w, origin, end);
+  scareCivilians(w, origin, end);
 }
 
 // Knife swing: hit every hostile inside the arc + reach in front.
@@ -170,5 +210,56 @@ export function meleeHit(
       addHitstop(w, 0.06);
       addShake(w, 4);
     }
+  }
+}
+
+// Flamethrower tick: scorch every hostile, civilian and car inside the short
+// cone in front of the player. Damage is strongest up close and tapers toward
+// the tip of the flame. Called every fire tick while the trigger is held.
+export function flameHit(
+  w: World,
+  origin: Vec2,
+  aim: number,
+  range: number,
+  arcHalf: number,
+  dmg: number,
+): void {
+  const scorch = (px: number, py: number, radius: number): number => {
+    const dx = px - origin.x;
+    const dy = py - origin.y;
+    const d = Math.hypot(dx, dy);
+    if (d > range + radius) return 0;
+    if (d > 1e-3 && Math.abs(angleDiff(aim, angleOf({ x: dx, y: dy }))) > arcHalf) return 0;
+    return dmg * (1 - Math.min(1, d / (range + radius)) * 0.6);
+  };
+  for (const e of w.enemies) {
+    if (!e.alive) continue;
+    const s = scorch(e.pos.x, e.pos.y, e.radius);
+    if (s <= 0) continue;
+    e.hp -= s;
+    e.aggro = AGGRO_TIME;
+    e.flash = 0.05;
+    if (e.hp <= 0 && e.alive) {
+      e.alive = false;
+      spawnDeath(w, e.pos, aim);
+      sfxEnemyDeath();
+    }
+  }
+  for (const c of w.civilians) {
+    if (!c.alive) continue;
+    const s = scorch(c.pos.x, c.pos.y, c.radius);
+    if (s <= 0) continue;
+    c.hp -= s;
+    c.panic = Math.max(c.panic, 3);
+    c.fleeFrom = { x: origin.x, y: origin.y };
+    if (c.hp <= 0 && c.alive) {
+      c.alive = false;
+      spawnDeath(w, c.pos, aim);
+      sfxEnemyDeath();
+    }
+  }
+  for (const c of w.cars) {
+    const s = scorch(c.pos.x, c.pos.y, c.radius);
+    if (s > 0) damageCar(w, c, s);
   }
 }

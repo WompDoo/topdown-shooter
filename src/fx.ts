@@ -80,34 +80,72 @@ export function spawnSmokePuff(w: World, pos: Vec2, shade: keyof typeof SMOKE_SH
   });
 }
 
-// Small licking flame for a car that's about to blow.
+// A licking flame — for a car that's about to blow and for a burning wreck.
+// Rises and swells a touch as it's carried, rendered as an additive glow.
 export function spawnFire(w: World, pos: Vec2): void {
   w.particles.push({
-    pos: { x: pos.x + randSpread(3), y: pos.y + randSpread(3) },
-    vel: fromAngle(rand() * Math.PI * 2, randRange(20, 70)),
-    life: randRange(0.18, 0.4),
-    maxLife: 0.4,
-    size: randRange(3, 6),
-    color: rand() < 0.5 ? '#ffb028' : '#ff5a1e',
+    pos: { x: pos.x + randSpread(4), y: pos.y + randSpread(4) },
+    vel: fromAngle(rand() * Math.PI * 2, randRange(14, 55)),
+    life: randRange(0.26, 0.55),
+    maxLife: 0.55,
+    size: randRange(6, 12),
+    color: rand() < 0.5 ? '#ffc23a' : '#ff5a1e',
     drag: 3,
-    kind: 'spark',
+    kind: 'fire',
     angle: 0,
     spin: 0,
   });
 }
 
+// A jet of flame from a flamethrower: fire particles flung forward in a tight
+// cone that burn out around `range`, so the visible stream matches the hit cone.
+export function spawnFlameJet(w: World, origin: Vec2, aim: number, range: number, arcHalf: number): void {
+  for (let i = 0; i < 5; i++) {
+    const a = aim + randSpread(arcHalf * 1.4);
+    const sp = randRange(range * 2.4, range * 3.3); // fast + low drag so the stream reaches the cone
+    w.particles.push({
+      pos: { x: origin.x + randSpread(3), y: origin.y + randSpread(3) },
+      vel: fromAngle(a, sp),
+      life: randRange(0.18, 0.42),
+      maxLife: 0.42,
+      size: randRange(6, 14),
+      color: rand() < 0.5 ? '#ffca3a' : rand() < 0.6 ? '#ff7a1e' : '#ff4d1a',
+      drag: 1.5,
+      kind: 'fire',
+      angle: 0,
+      spin: 0,
+    });
+  }
+}
+
 export function spawnExplosion(w: World, pos: Vec2, scale = 1): void {
-  addShake(w, Math.min(14, 9 * scale));
-  addHitstop(w, 0.08);
-  w.decals.push({ pos: { ...pos }, r: randRange(24, 34) * scale, color: 'rgba(18,14,12,0.6)' });
-  for (let i = 0; i < Math.round(32 * scale); i++) {
-    const sp = randRange(120, 540) * scale;
+  addShake(w, Math.min(16, 12 * scale));
+  addHitstop(w, 0.09);
+  w.decals.push({ pos: { ...pos }, r: randRange(30, 44) * scale, color: 'rgba(18,14,12,0.6)' });
+  // A big white-hot fireball: fat, bright, additive blobs that bloom and fade.
+  for (let i = 0; i < Math.round(16 * scale); i++) {
+    w.particles.push({
+      pos: { x: pos.x + randSpread(6 * scale), y: pos.y + randSpread(6 * scale) },
+      vel: fromAngle(rand() * Math.PI * 2, randRange(30, 220) * scale),
+      life: randRange(0.3, 0.72),
+      maxLife: 0.72,
+      size: randRange(12, 26) * scale,
+      color: rand() < 0.5 ? '#fff2c4' : rand() < 0.6 ? '#ffb84a' : '#ff6a24',
+      drag: 3.4,
+      kind: 'fire',
+      angle: 0,
+      spin: 0,
+    });
+  }
+  // Flung burning debris streaks.
+  for (let i = 0; i < Math.round(40 * scale); i++) {
+    const sp = randRange(160, 640) * scale;
     w.particles.push({
       pos: { ...pos },
       vel: fromAngle(rand() * Math.PI * 2, sp),
-      life: randRange(0.25, 0.6),
-      maxLife: 0.6,
-      size: randRange(3, 8) * scale,
+      life: randRange(0.25, 0.65),
+      maxLife: 0.65,
+      size: randRange(3, 9) * scale,
       color: rand() < 0.45 ? '#ffd066' : rand() < 0.7 ? '#ff7a29' : '#e23b1e',
       drag: 5,
       kind: 'spark',
@@ -115,13 +153,14 @@ export function spawnExplosion(w: World, pos: Vec2, scale = 1): void {
       spin: 0,
     });
   }
-  for (let i = 0; i < Math.round(16 * scale); i++) {
+  // Roiling smoke column, larger and longer-lived than the flames.
+  for (let i = 0; i < Math.round(22 * scale); i++) {
     w.particles.push({
       pos: { ...pos },
-      vel: fromAngle(rand() * Math.PI * 2, randRange(20, 130) * scale),
-      life: randRange(0.9, 1.9),
-      maxLife: 1.9,
-      size: randRange(8, 17) * scale,
+      vel: fromAngle(rand() * Math.PI * 2, randRange(20, 150) * scale),
+      life: randRange(1.1, 2.4),
+      maxLife: 2.4,
+      size: randRange(10, 22) * scale,
       color: rand() < 0.5 ? 'rgba(38,34,32,0.6)' : 'rgba(78,74,72,0.5)',
       drag: 1.4,
       kind: 'smoke',

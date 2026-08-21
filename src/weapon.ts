@@ -31,6 +31,16 @@ export interface Weapon {
   arc: number; // half-arc in radians
   lunge: number; // forward dash speed on swing
   swingTime: number; // seconds between swings
+  // explosive projectile weapons (optional)
+  projectile?: 'grenade' | 'rocket';
+  blastRadius?: number;
+  projSpeed?: number; // launch speed (px/s)
+  projFuse?: number; // seconds until it auto-detonates
+  thrown?: boolean; // hand-thrown: hold to charge distance, cooks off if held too long
+  // flame weapons (optional): a short continuous cone of fire, no hitscan/projectile
+  flame?: boolean;
+  flameRange?: number; // reach of the flame cone (px)
+  flameArc?: number; // half-angle of the cone (radians)
 }
 
 const GUN = {
@@ -135,6 +145,160 @@ export const SNIPER: Weapon = {
   adsSpreadMult: 0.05, // pinpoint when scoped
 };
 
+export const SMG: Weapon = {
+  ...GUN,
+  name: 'Vector SMG',
+  sound: 'pistol',
+  auto: true,
+  rpm: 900,
+  damage: 14,
+  spreadMin: 0.05,
+  spreadMax: 0.19,
+  spreadPerShot: 0.02,
+  spreadRecover: 1.5,
+  mag: 32,
+  reloadTime: 1.6,
+  range: 620,
+  knockback: 45,
+  recoilKick: 0.035,
+  shake: 1.6,
+  muzzleSize: 15,
+  adsZoom: 1.22,
+  adsMoveMult: 0.62,
+  adsSpreadMult: 0.5,
+};
+
+export const HMG: Weapon = {
+  ...GUN,
+  name: 'M60 HMG',
+  sound: 'rifle',
+  auto: true,
+  rpm: 600,
+  damage: 34,
+  spreadMin: 0.03,
+  spreadMax: 0.26,
+  spreadPerShot: 0.03,
+  spreadRecover: 0.8,
+  mag: 100,
+  reloadTime: 4.5,
+  range: 1000,
+  knockback: 120,
+  recoilKick: 0.06,
+  shake: 3.2,
+  muzzleSize: 26,
+  adsZoom: 1.18,
+  adsMoveMult: 0.4, // heavy: you slow right down behind it
+  adsSpreadMult: 0.55,
+};
+
+export const GRENADE: Weapon = {
+  ...GUN,
+  name: 'Frag Grenade',
+  sound: 'shotgun',
+  auto: false,
+  rpm: 70,
+  damage: 95, // blast damage at the centre
+  spreadMin: 0.03,
+  spreadMax: 0.03,
+  spreadPerShot: 0,
+  spreadRecover: 1,
+  mag: 3,
+  reloadTime: 2,
+  range: 500,
+  knockback: 220,
+  recoilKick: 0.02,
+  shake: 2,
+  muzzleSize: 0,
+  adsZoom: 1.15,
+  adsMoveMult: 0.72,
+  adsSpreadMult: 0.5,
+  projectile: 'grenade',
+  blastRadius: 130,
+  projSpeed: 360, // base lob; the real launch speed scales with how long you cook it
+  projFuse: 2.4, // cook time: hold past this and it goes off in your hand
+  thrown: true,
+};
+
+export const GRENADE_LAUNCHER: Weapon = {
+  ...GUN,
+  name: 'Grenade Launcher',
+  sound: 'shotgun',
+  auto: false,
+  rpm: 75,
+  damage: 105,
+  spreadMin: 0.03,
+  spreadMax: 0.07,
+  spreadPerShot: 0.01,
+  spreadRecover: 1.4,
+  mag: 6,
+  reloadTime: 3,
+  range: 950,
+  knockback: 240,
+  recoilKick: 0.12,
+  shake: 5,
+  muzzleSize: 24,
+  adsZoom: 1.2,
+  adsMoveMult: 0.55,
+  adsSpreadMult: 0.55,
+  projectile: 'grenade',
+  blastRadius: 150,
+  projSpeed: 640,
+  projFuse: 2.4,
+};
+
+export const ROCKET_LAUNCHER: Weapon = {
+  ...GUN,
+  name: 'Rocket Launcher',
+  sound: 'sniper',
+  auto: false,
+  rpm: 40,
+  damage: 170,
+  spreadMin: 0.01,
+  spreadMax: 0.02,
+  spreadPerShot: 0,
+  spreadRecover: 1,
+  mag: 4,
+  reloadTime: 3.6,
+  range: 1600,
+  knockback: 300,
+  recoilKick: 0.22,
+  shake: 8,
+  muzzleSize: 30,
+  adsZoom: 1.28,
+  adsMoveMult: 0.45,
+  adsSpreadMult: 0.3,
+  projectile: 'rocket',
+  blastRadius: 200,
+  projSpeed: 740,
+  projFuse: 3,
+};
+
+export const FLAMETHROWER: Weapon = {
+  ...GUN,
+  name: 'Flamethrower',
+  sound: 'shotgun',
+  auto: true,
+  rpm: 1000, // ticks/min; a fast, continuous stream of flame
+  damage: 6, // per tick, close range — high DPS but drops off fast with distance
+  spreadMin: 0.05,
+  spreadMax: 0.05,
+  spreadPerShot: 0,
+  spreadRecover: 1,
+  mag: 120, // fuel
+  reloadTime: 3,
+  range: 300,
+  knockback: 12,
+  recoilKick: 0.01,
+  shake: 0.6,
+  muzzleSize: 0,
+  adsZoom: 1.1,
+  adsMoveMult: 0.7,
+  adsSpreadMult: 1,
+  flame: true,
+  flameRange: 300,
+  flameArc: 0.32,
+};
+
 export const KNIFE: Weapon = {
   ...GUN,
   kind: 'melee',
@@ -163,7 +327,9 @@ export const KNIFE: Weapon = {
   swingTime: 0.34,
 };
 
-export const PLAYER_WEAPONS: Weapon[] = [PISTOL, RIFLE, SHOTGUN, SNIPER, KNIFE];
+export const PLAYER_WEAPONS: Weapon[] = [
+  PISTOL, SMG, RIFLE, HMG, SHOTGUN, SNIPER, GRENADE, GRENADE_LAUNCHER, ROCKET_LAUNCHER, FLAMETHROWER, KNIFE,
+];
 
 // --- Enemy weapons ---
 

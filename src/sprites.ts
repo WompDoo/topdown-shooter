@@ -54,6 +54,11 @@ export function wreckAtlas(kind: VehicleKind): HTMLImageElement | null {
   return load(`wreck_${kind}`);
 }
 
+// The shared weapons atlas (all guns + melee on one sheet), or null until loaded.
+export function weaponSheet(): HTMLImageElement | null {
+  return load('weapons');
+}
+
 function load(key: string): HTMLImageElement | null {
   let img = images[key];
   if (!img) {

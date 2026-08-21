@@ -5,20 +5,38 @@
 import type { Input } from './input';
 import type { Player, World } from './world';
 import type { Vec2 } from './math';
-import { enterCar } from './car';
-import { add, angleOf, approach, clamp, fromAngle, len, randSpread, resolveCircleRect, scale, sub } from './math';
+import type { Weapon } from './weapon';
+import { driverDoor, enterCar } from './car';
+import { add, angleOf, approach, clamp, collideCircleSegment, fromAngle, len, randSpread, resolveCircleRect, scale, sub } from './math';
 import { fireInterval } from './weapon';
-import { meleeHit, resolveShot } from './combat';
-import { addShake, spawnCasing, spawnMuzzle, spawnSlash } from './fx';
+import { barrelDist } from './weaponart';
+import { flameHit, meleeHit, resolveShot } from './combat';
+import { spawnProjectile } from './projectile';
+import { addShake, spawnCasing, spawnFlameJet, spawnMuzzle, spawnSlash } from './fx';
 import { sfxDryFire, sfxReload, sfxWeapon } from './audio';
 
 const MOVE_SPEED = 205;
 const SPRINT_MULT = 1.6; // speed boost while holding Shift on foot
 const DIVE_DRAG = 3.2; // ground friction while tumbling out of a car
 
+// Hand-grenade throw charge: hold to wind up a longer throw (and cook the fuse).
+const GRENADE_CHARGE_TIME = 1.1; // seconds of hold to reach the max throw
+const GRENADE_MIN_THROW = 230; // launch speed on a quick tap (px/s)
+const GRENADE_MAX_THROW = 560; // launch speed at full charge (~70% of the launcher's reach)
+
 // Push the player out of walls and cars, then clamp to the world.
 function resolveFoot(w: World, p: Player): void {
   for (const b of w.solids) resolveCircleRect(p.pos, p.radius, b);
+  const t = w.track;
+  if (
+    t &&
+    p.pos.x > t.bbox.x - 40 &&
+    p.pos.x < t.bbox.x + t.bbox.w + 40 &&
+    p.pos.y > t.bbox.y - 40 &&
+    p.pos.y < t.bbox.y + t.bbox.h + 40
+  ) {
+    for (const s of t.walls) collideCircleSegment(p.pos, p.radius, s.a, s.b, t.wallHalf);
+  }
   for (const c of w.cars) {
     const dx = p.pos.x - c.pos.x;
     const dy = p.pos.y - c.pos.y;
@@ -50,6 +68,7 @@ function updateDive(w: World, p: Player, dt: number): void {
     p.roll = 0;
   }
   p.flash = Math.max(0, p.flash - dt);
+  p.ads = Math.max(0, p.ads - dt * 6);
 }
 
 export function swapWeapon(p: Player, next: number): void {
@@ -62,6 +81,20 @@ export function swapWeapon(p: Player, next: number): void {
   p.reloadTimer = 0;
   p.fireTimer = Math.max(p.fireTimer, 0.12);
   p.spread = p.weapon.spreadMin;
+  p.charge = 0;
+}
+
+// Equip a weapon grabbed off the ground into the active slot, topped up.
+export function equipWeapon(p: Player, weapon: Weapon): void {
+  p.slots[p.slot] = weapon;
+  p.weapon = weapon;
+  p.slotAmmo[p.slot] = weapon.mag;
+  p.ammo = weapon.mag;
+  p.reloading = false;
+  p.reloadTimer = 0;
+  p.fireTimer = Math.max(p.fireTimer, 0.12);
+  p.spread = weapon.spreadMin;
+  p.charge = 0;
 }
 
 function startReload(p: Player): void {
@@ -77,6 +110,7 @@ export function updatePlayer(w: World, input: Input, aimWorld: Vec2, dt: number)
   if (p.downed) {
     p.flash = Math.max(0, p.flash - dt);
     p.swing = Math.max(0, p.swing - dt);
+    p.ads = 0;
     return;
   }
 
@@ -93,6 +127,11 @@ export function updatePlayer(w: World, input: Input, aimWorld: Vec2, dt: number)
   p.aim = angleOf(sub(aimWorld, p.pos));
   const aimDir = fromAngle(p.aim);
 
+  // Aim down sights (hold right mouse): zoom (camera, in main), a tighter cone
+  // and slower walk. Guns only; smoothed so it eases in and out.
+  const wantAds = input.rightDown && !isMelee;
+  p.ads = approach(p.ads, wantAds ? 1 : 0, dt * 8);
+
   // --- Move ---
   let ix = 0;
   let iy = 0;
@@ -108,10 +147,11 @@ export function updatePlayer(w: World, input: Input, aimWorld: Vec2, dt: number)
     if (ix !== 0 || iy !== 0 || !car || car.dead) {
       p.walkTo = -1;
     } else {
-      const dx = car.pos.x - p.pos.x;
-      const dy = car.pos.y - p.pos.y;
+      const door = driverDoor(car);
+      const dx = door.x - p.pos.x;
+      const dy = door.y - p.pos.y;
       const d = Math.hypot(dx, dy);
-      if (d <= p.radius + car.radius + 10) {
+      if (d <= p.radius + 8) {
         enterCar(w, p.walkTo);
         p.walkTo = -1;
         return;
@@ -123,8 +163,9 @@ export function updatePlayer(w: World, input: Input, aimWorld: Vec2, dt: number)
 
   const moveLen = Math.hypot(ix, iy);
   const move: Vec2 = moveLen > 0 ? { x: ix / moveLen, y: iy / moveLen } : { x: 0, y: 0 };
-  const sprinting = input.isDown('ShiftLeft') || input.isDown('ShiftRight');
-  p.vel = scale(move, MOVE_SPEED * (sprinting ? SPRINT_MULT : 1));
+  const sprinting = (input.isDown('ShiftLeft') || input.isDown('ShiftRight')) && p.ads < 0.5;
+  const adsMove = 1 + (wpn.adsMoveMult - 1) * p.ads;
+  p.vel = scale(move, MOVE_SPEED * (sprinting ? SPRINT_MULT : 1) * adsMove);
   if (isMelee && p.swing > 0) {
     const l = wpn.lunge * (p.swing / wpn.swingTime);
     p.vel.x += aimDir.x * l;
@@ -168,19 +209,70 @@ export function updatePlayer(w: World, input: Input, aimWorld: Vec2, dt: number)
       p.aimKick = 0.3;
     }
   } else {
-    const shootOrigin = add(p.pos, scale(aimDir, p.radius + 6));
-    if (canFire && p.fireTimer <= 0) {
-      const cone = Math.min(p.spread, wpn.spreadMax);
-      const pellets = Math.max(1, wpn.pellets);
-      for (let i = 0; i < pellets; i++) {
-        resolveShot(w, shootOrigin, p.aim + randSpread(cone), wpn.damage, wpn.range, 'player', wpn.knockback);
+    const shootOrigin = add(p.pos, scale(aimDir, barrelDist(wpn, p.radius)));
+    if (wpn.thrown) {
+      // Hand grenade: hold to cook the fuse + wind up the throw, release to lob.
+      // Charge maps to distance; hold past the fuse and it goes off in your hand.
+      const canThrow = !p.reloading && p.ammo > 0 && w.state === 'playing';
+      if (heldFire && canThrow && p.fireTimer <= 0) {
+        p.charge += dt;
+        if (p.charge >= (wpn.projFuse ?? 2)) {
+          // cooked too long — detonate on the spot (spawn a live, still grenade)
+          spawnProjectile(w, { x: p.pos.x, y: p.pos.y }, p.aim, wpn, 'player', { speed: 0, fuse: 0 });
+          p.ammo -= 1;
+          p.charge = 0;
+          p.fireTimer = 0.5;
+          if (p.ammo <= 0) startReload(p);
+        }
+      } else if (p.charge > 0) {
+        if (canThrow) {
+          const frac = Math.min(1, p.charge / GRENADE_CHARGE_TIME);
+          const speed = GRENADE_MIN_THROW + (GRENADE_MAX_THROW - GRENADE_MIN_THROW) * frac;
+          const fuse = Math.max(0.35, (wpn.projFuse ?? 2) - p.charge); // keeps cooking in the air
+          spawnProjectile(w, shootOrigin, p.aim, wpn, 'player', { speed, fuse });
+          p.ammo -= 1;
+          p.fireTimer = 0.4;
+          p.aimKick = Math.min(p.aimKick + wpn.recoilKick, 0.6);
+          sfxWeapon(wpn.sound);
+          if (p.ammo <= 0) startReload(p);
+        }
+        p.charge = 0;
+      }
+    } else if (wpn.flame) {
+      // Flamethrower: a continuous cone of fire while held — no hitscan or casings.
+      if (canFire && p.fireTimer <= 0) {
+        const range = wpn.flameRange ?? 300;
+        const arc = wpn.flameArc ?? 0.3;
+        flameHit(w, shootOrigin, p.aim, range, arc, wpn.damage);
+        spawnFlameJet(w, shootOrigin, p.aim, range, arc);
+        p.ammo -= 1;
+        p.muzzleTimer = 0.05;
+        addShake(w, wpn.shake);
+        if (Math.random() < 0.2) sfxWeapon(wpn.sound); // an intermittent hiss, not a rattle
+        p.fireTimer = fireInterval(wpn);
+        fired = true;
+        if (p.ammo <= 0) startReload(p);
+      } else if (heldFire && p.ammo <= 0 && !p.reloading && p.fireTimer <= 0) {
+        startReload(p);
+        p.fireTimer = 0.25;
+      }
+    } else if (canFire && p.fireTimer <= 0) {
+      const cone = Math.min(p.spread, wpn.spreadMax) * (1 + (wpn.adsSpreadMult - 1) * p.ads);
+      if (wpn.projectile) {
+        // lob / launch an explosive instead of a hitscan shot
+        spawnProjectile(w, shootOrigin, p.aim + randSpread(cone), wpn, 'player');
+      } else {
+        const pellets = Math.max(1, wpn.pellets);
+        for (let i = 0; i < pellets; i++) {
+          resolveShot(w, shootOrigin, p.aim + randSpread(cone), wpn.damage, wpn.range, 'player', wpn.knockback);
+        }
       }
       p.ammo -= 1;
       p.spread = Math.min(p.spread + wpn.spreadPerShot, wpn.spreadMax);
       p.aimKick = Math.min(p.aimKick + wpn.recoilKick, 0.6);
       p.muzzleTimer = 0.05;
-      spawnMuzzle(w, shootOrigin, p.aim, wpn.muzzleSize);
-      spawnCasing(w, shootOrigin, p.aim);
+      if (wpn.muzzleSize > 0) spawnMuzzle(w, shootOrigin, p.aim, wpn.muzzleSize);
+      if (!wpn.projectile) spawnCasing(w, shootOrigin, p.aim); // no shell for a lobbed grenade
       addShake(w, wpn.shake);
       sfxWeapon(wpn.sound);
       p.fireTimer = fireInterval(wpn);

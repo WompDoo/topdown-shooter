@@ -3,14 +3,14 @@
 
 import { createInput } from './input';
 import { buildWorld, DEFAULT_LOADOUT } from './world';
-import { updatePlayer } from './player';
+import { equipWeapon, updatePlayer } from './player';
 import { updateEnemies } from './enemy';
+import { updateCivilians } from './civilian';
+import { updateProjectiles } from './projectile';
 import { updateFx } from './fx';
 import {
   AUTO_PATH_RANGE,
   carEffects,
-  ENTER_REACH,
-  enterCar,
   exitCar,
   nearestCarIndex,
   resolveCarCollisions,
@@ -77,12 +77,7 @@ function fixedUpdate(dt: number): void {
       updatePlayer(w, input, screenToWorld(input.mouse.x, input.mouse.y), dt);
       if (input.pressed('KeyF') && p.enterTimer <= 0 && p.dive <= 0) {
         const idx = nearestCarIndex(w, AUTO_PATH_RANGE);
-        if (idx >= 0) {
-          const car = w.cars[idx];
-          const d = Math.hypot(car.pos.x - p.pos.x, car.pos.y - p.pos.y);
-          if (d <= p.radius + ENTER_REACH) enterCar(w, idx);
-          else p.walkTo = idx;
-        }
+        if (idx >= 0) p.walkTo = idx; // walk to the driver door, then board
       }
     }
     // Abandoned / bumped cars keep their momentum and coast on their own.
@@ -97,6 +92,18 @@ function fixedUpdate(dt: number): void {
       p.pos.y = w.cars[p.inCar].pos.y;
     }
     updateEnemies(w, dt);
+    updateCivilians(w, dt);
+    updateProjectiles(w, dt);
+    // Weapon pickups: walk over one to equip it (swaps the active slot).
+    if (p.inCar < 0 && !p.downed && p.dive <= 0) {
+      for (const pk of w.pickups) {
+        if (p.weapon.name === pk.weapon.name) continue;
+        if (Math.hypot(pk.pos.x - p.pos.x, pk.pos.y - p.pos.y) < p.radius + pk.radius) {
+          equipWeapon(p, pk.weapon);
+          break;
+        }
+      }
+    }
   } else if (input.pressed('KeyR')) {
     world = buildWorld(DEFAULT_LOADOUT);
     cam.x = world.player.pos.x;
@@ -109,6 +116,9 @@ function updateCamera(dt: number): void {
   const p = world.player;
   const car = p.inCar >= 0 ? world.cars[p.inCar] : null;
   const focus = car ? car.pos : p.pos;
+  // Aiming down sights zooms the camera in (on foot, guns only).
+  const targetZoom = car ? BASE_ZOOM : BASE_ZOOM * (1 + (p.weapon.adsZoom - 1) * p.ads);
+  cam.zoom = lerp(cam.zoom, targetZoom, 1 - Math.exp(-9 * dt));
   let leadX: number;
   let leadY: number;
   if (car) {

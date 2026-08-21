@@ -8,22 +8,28 @@
 
 import type { Car, World } from './world';
 import type { Input } from './input';
+import type { Vec2 } from './math';
 import { VEHICLES } from './vehicles';
-import { clamp, collideCircleRect, fromAngle, resolveCircleRect } from './math';
+import type { Drivetrain } from './vehicles';
+import { angleDiff, clamp, collideCircleRect, collideCircleSegment, fromAngle, randSpread, resolveCircleRect } from './math';
 import { addHitstop, addShake, spawnBlood, spawnDeath, spawnExplosion, spawnFire, spawnSmokePuff } from './fx';
 import { sfxEnemyDeath } from './audio';
 
-const ACCEL = 640;
-const REV_ACCEL = 320;
-const ENGINE_DRAG = 260; // extra coast-down when off throttle
-const ROLL = 0.5; // rolling resistance (always on the forward axis)
-const MAX_FWD = 560;
-const MAX_REV = 190;
+const RPM_PER_SPEED = 2.4; // engine rpm gained per (px/s) x gear x finalDrive
+const DRIVE_K = 0.02; // torque x gearing -> forward accel; low = weighty (0-100 in ~3-4s)
+const DRAG_K = 0.00002; // aero drag (grows with v^2); tiny — redline sets a high top speed
+const ROLL_K = 0.012; // rolling resistance (linear in v)
+const POWER_GRIP_REF = 130; // accel that fully loads the tyres for the power-oversteer circle
+const BRAKE = 900; // braking deceleration (throttle held against motion)
+const ENGINE_BRAKE = 190; // coast-down deceleration off throttle
+const MAX_FWD_CAP = 1000; // safety clamp; drag limits real speed well below this
+const MAX_REV = 220; // reverse speed cap
 const TURN_RATE = 3.0; // rad/s of steering authority at speed
 const HB_TURN = 1.7; // extra steering authority with the handbrake pulled
-const GRIP = 9.0; // lateral traction — high = tyres bite, tight cornering
-const HANDBRAKE_GRIP = 1.0; // lateral traction while sliding — low = long drift
+const GRIP_ACCEL = 1150; // base lateral grip: px/s^2 the tyres hold before sliding
+const HANDBRAKE_GRIP_ACCEL = 150; // grip with the handbrake pulled — low = long drifts
 const STEER_SPEED_REF = 120; // speed for full steering authority
+const STEER_HISPEED = 300; // above this speed steering authority tapers for stability
 const SKID_MIN = 55; // lateral speed above which the tyres leave marks
 const WALL_BOUNCE = 0.15; // restitution off walls (0 = dead stop, 1 = full bounce)
 const WALL_SCRUB = 0.08; // tangential speed lost per wall contact (scrape friction)
@@ -32,17 +38,42 @@ export const ENTER_REACH = 34;
 const RUN_OVER_SPEED = 120;
 const DIVE_SPEED = 150; // bail out above this and you tumble instead of stepping off
 const DIVE_TIME = 0.55; // seconds of tumble
-const WALL_DAMAGE_MIN = 170; // into-wall speed a hit must exceed to dent the car
-const CAR_DAMAGE_MIN = 150; // closing speed a car-car bump must exceed to dent
-const DAMAGE_PER_SPEED = 0.6; // hp lost per unit of speed above the threshold
+const WALL_DAMAGE_MIN = 240; // into-wall speed a hit must exceed to dent the car
+const CAR_DAMAGE_MIN = 220; // closing speed a car-car bump must exceed to dent
+const DAMAGE_PER_SPEED = 0.5; // hp lost per unit of speed above the threshold
 const SMOKE_HP = 0.6; // start smoking below this fraction of max hp
-const BURN_HP = 0.12; // catch fire below this; then burn down to the explosion
+const BURN_HP = 0.1; // catch fire below this; then burn down to the explosion
+const BURN_RATE = 0.03; // fraction of max hp lost per second while ablaze (slow: a real stage)
+const WRECK_BURN_TIME = 6; // seconds a fresh wreck stays engulfed before it just smoulders
 const BLOODY_TIRE_TIME = 1.4; // seconds of red tyre tracks after a run-over
 const EXPLOSION_RADIUS = 150;
 const EXPLOSION_ENEMY_DMG = 500;
 const EXPLOSION_PLAYER_DMG = 55;
-const EXPLOSION_CAR_DMG = 120;
+const EXPLOSION_CAR_DMG = 260; // a blast still hurts neighbours (durable cars won't chain instantly)
 const MAX_GORE = 6;
+
+// --- Where a bullet lands scales its damage. Hits register on the body face
+// pointing at the shooter, so the shot's approach angle vs the car's heading
+// tells us the panel: the grille/engine bay (front) and a narrow slice dead
+// behind (the fuel tank) are weak points; the doors, flanks and broad rear body
+// are armoured and shrug rounds off. ---
+const ENGINE_MULT = 2.0; // front cone: engine bay
+const TANK_MULT = 2.6; // narrow rear cone: fuel tank (the sweet spot)
+const ARMOR_MULT = 0.45; // doors, flanks, rear body
+const ENGINE_HALF = 0.85; // rad, front cone half-width (~49deg)
+const TANK_HALF = 0.5; // rad, rear fuel-tank cone half-width (~29deg)
+
+// Engine torque at a given rpm: a smooth hump peaking at peakRpm with a floor so
+// it always pulls a little off-cam, tapering to zero at redline (a rev limiter,
+// so top gear tops out at redline rather than over-revving).
+function torqueAt(d: Drivetrain, rpm: number): number {
+  if (rpm >= d.redlineRpm) return 0;
+  const x = (rpm - d.peakRpm) / (d.redlineRpm - d.idleRpm);
+  let t = clamp(1 - 1.7 * x * x, 0.28, 1);
+  const over = (rpm - 0.9 * d.redlineRpm) / (0.1 * d.redlineRpm);
+  if (over > 0) t *= Math.max(0, 1 - over);
+  return d.peakTorque * t;
+}
 
 export function updateCar(w: World, car: Car, input: Input, dt: number): void {
   if (car.dead) return;
@@ -63,8 +94,9 @@ export function updateCar(w: World, car: Car, input: Input, dt: number): void {
   const travel = car.vel.x * pre.x + car.vel.y * pre.y;
   const speed = Math.hypot(car.vel.x, car.vel.y);
   const speedFactor = clamp(speed / STEER_SPEED_REF, 0, 1);
+  const hiSpeed = clamp(1 - (speed - STEER_HISPEED) / 900, 0.5, 1); // calmer wheel at speed
   const dir = travel < -1 ? -1 : 1;
-  car.angle += steer * TURN_RATE * hnd.turn * (handbrake ? HB_TURN : 1) * speedFactor * dir * dt;
+  car.angle += steer * TURN_RATE * hnd.turn * (handbrake ? HB_TURN : 1) * speedFactor * hiSpeed * dir * dt;
 
   // Decompose velocity onto the NEW heading (same basis for de/recompose keeps
   // the momentum in world space — the car can point one way and slide another).
@@ -73,16 +105,57 @@ export function updateCar(w: World, car: Car, input: Input, dt: number): void {
   let vFwd = car.vel.x * fwd.x + car.vel.y * fwd.y;
   let vLat = car.vel.x * right.x + car.vel.y * right.y;
 
-  // engine + rolling resistance on the forward axis (no handbrake braking here —
-  // the handbrake is for traction, not stopping)
-  if (throttle > 0) vFwd += ACCEL * hnd.accel * dt;
-  else if (throttle < 0) vFwd -= REV_ACCEL * hnd.accel * dt;
-  else vFwd -= Math.sign(vFwd) * Math.min(Math.abs(vFwd), ENGINE_DRAG * dt);
-  vFwd *= Math.max(0, 1 - ROLL * dt);
-  vFwd = clamp(vFwd, -MAX_REV * hnd.top, MAX_FWD * hnd.top);
+  // --- Drivetrain: an engine torque curve through an automatic gearbox ---
+  // A damaged engine makes less power (no penalty until under 60% hp, building as
+  // it nears death). Steering is left untouched so a smoking wreck is drivable.
+  const dtrain = hnd.drivetrain;
+  const frac = car.hp / car.maxHp;
+  const wear = clamp((0.6 - frac) / 0.6, 0, 1);
+  const wearMul = 1 - 0.32 * wear;
+  const wheelSpd = Math.abs(vFwd);
 
-  // lateral grip: the tyres bite, or the handbrake lets the back slide
-  vLat *= Math.exp(-(handbrake ? HANDBRAKE_GRIP : GRIP * hnd.grip) * dt);
+  // engage reverse when asking to go back from a near-stop, else a forward gear
+  if (car.gear >= 0 && throttle < 0 && vFwd < 20) car.gear = -1;
+  else if (car.gear < 0 && (throttle > 0 || vFwd > -5)) car.gear = 0;
+
+  const ratio = car.gear < 0 ? dtrain.reverse : dtrain.gears[car.gear];
+  car.rpm = clamp(dtrain.idleRpm + wheelSpd * ratio * dtrain.finalDrive * RPM_PER_SPEED, dtrain.idleRpm, dtrain.redlineRpm);
+
+  // automatic shifting (forward gears), with a short lockout to stop hunting
+  car.shiftTimer = Math.max(0, car.shiftTimer - dt);
+  if (car.gear >= 0 && car.shiftTimer <= 0) {
+    if (car.rpm > dtrain.redlineRpm * 0.93 && car.gear < dtrain.gears.length - 1) {
+      car.gear++;
+      car.shiftTimer = 0.35;
+    } else if (car.rpm < dtrain.redlineRpm * 0.42 && car.gear > 0) {
+      car.gear--;
+      car.shiftTimer = 0.35;
+    }
+  }
+
+  const driveAccel = (torqueAt(dtrain, car.rpm) * ratio * dtrain.finalDrive * DRIVE_K * wearMul * hnd.power) / dtrain.inertia;
+  if (car.gear < 0) {
+    if (throttle < 0) vFwd -= driveAccel * dt; // reversing
+  } else if (throttle > 0) {
+    vFwd += driveAccel * dt; // driving
+  } else if (throttle < 0) {
+    vFwd -= Math.sign(vFwd) * Math.min(Math.abs(vFwd), BRAKE * dt); // braking
+  } else {
+    vFwd -= Math.sign(vFwd) * Math.min(Math.abs(vFwd), ENGINE_BRAKE * dt); // coasting
+  }
+
+  // resistance sets the natural top speed (aero grows with v^2, rolling is linear)
+  vFwd -= (DRAG_K * vFwd * Math.abs(vFwd) + ROLL_K * vFwd) * dt;
+  vFwd = clamp(vFwd, -MAX_REV, MAX_FWD_CAP);
+
+  // Tyre grip as a friction circle: accelerating hard uses up grip that's then
+  // unavailable for cornering (power-on oversteer, scaled by the car's balance);
+  // the tyres only hold so much lateral before they let go and the car slides.
+  const throttleLoad = throttle > 0 ? clamp(driveAccel / POWER_GRIP_REF, 0, 1) : 0;
+  const gripLoss = clamp(throttleLoad * hnd.balance, 0, 0.85);
+  const latGrip = handbrake ? HANDBRAKE_GRIP_ACCEL : GRIP_ACCEL * hnd.grip * (1 - gripLoss);
+  const kill = Math.min(Math.abs(vLat), latGrip * dt);
+  vLat -= Math.sign(vLat) * kill;
 
   car.vel = { x: fwd.x * vFwd + right.x * vLat, y: fwd.y * vFwd + right.y * vLat };
   car.speed = vFwd;
@@ -149,6 +222,28 @@ function collideCarWalls(w: World, car: Car): void {
       impact = Math.max(impact, -vn);
     }
   }
+  // Curved circuit guardrails (segments), gated by the track's bounding box.
+  const t = w.track;
+  if (
+    t &&
+    car.pos.x > t.bbox.x - 80 &&
+    car.pos.x < t.bbox.x + t.bbox.w + 80 &&
+    car.pos.y > t.bbox.y - 80 &&
+    car.pos.y < t.bbox.y + t.bbox.h + 80
+  ) {
+    for (const s of t.walls) {
+      const n = collideCircleSegment(car.pos, car.radius, s.a, s.b, t.wallHalf);
+      if (!n) continue;
+      const vn = car.vel.x * n.x + car.vel.y * n.y;
+      if (vn < 0) {
+        car.vel.x -= (1 + WALL_BOUNCE) * vn * n.x;
+        car.vel.y -= (1 + WALL_BOUNCE) * vn * n.y;
+        car.vel.x *= 1 - WALL_SCRUB;
+        car.vel.y *= 1 - WALL_SCRUB;
+        impact = Math.max(impact, -vn);
+      }
+    }
+  }
   const minX = w.bounds.x + car.radius;
   const maxX = w.bounds.x + w.bounds.w - car.radius;
   const minY = w.bounds.y + car.radius;
@@ -186,6 +281,24 @@ function carRunOver(w: World, car: Car): void {
       addHitstop(w, 0.05);
     }
   }
+  for (const c of w.civilians) {
+    if (!c.alive) continue;
+    if (Math.hypot(c.pos.x - car.pos.x, c.pos.y - car.pos.y) > car.radius + c.radius) continue;
+    c.hp -= 400;
+    c.panic = Math.max(c.panic, 3);
+    c.fleeFrom = { x: car.pos.x, y: car.pos.y };
+    c.vel.x += car.vel.x * 0.8;
+    c.vel.y += car.vel.y * 0.8;
+    spawnBlood(w, c.pos, car.angle, 16);
+    addShake(w, 5);
+    addGore(car, c.pos);
+    car.bloodyTires = BLOODY_TIRE_TIME;
+    if (c.hp <= 0 && c.alive) {
+      c.alive = false;
+      spawnDeath(w, c.pos, car.angle);
+      sfxEnemyDeath();
+    }
+  }
 }
 
 // Stamp a blood splat onto the car where the body hit them, kept in the car's
@@ -200,6 +313,16 @@ function addGore(car: Car, at: { x: number; y: number }): void {
   if (car.gore.length > MAX_GORE) car.gore.shift();
 }
 
+// Multiplier a bullet's damage takes for where it struck the car (see the zone
+// constants above). `hit` is the impact point; the angle from the car centre to
+// it, relative to the heading, picks the panel.
+export function bulletDamageMultiplier(car: Car, hit: Vec2): number {
+  const a = Math.abs(angleDiff(car.angle, Math.atan2(hit.y - car.pos.y, hit.x - car.pos.x)));
+  if (a < ENGINE_HALF) return ENGINE_MULT; // grille / engine bay up front
+  if (a > Math.PI - TANK_HALF) return TANK_MULT; // dead behind: the fuel tank
+  return ARMOR_MULT; // doors, flanks, rear body
+}
+
 // Damage + destruction. A destroyed car explodes into a burnt wreck.
 export function damageCar(w: World, car: Car, amount: number): void {
   if (car.dead || amount <= 0) return;
@@ -212,6 +335,8 @@ function destroyCar(w: World, car: Car): void {
   car.dead = true;
   car.hp = 0;
   car.pop = 1;
+  car.wreckFire = WRECK_BURN_TIME + Math.random() * 2;
+  car.smoke = 0; // start belching flame immediately, not after the old countdown
   car.vel.x *= 0.3;
   car.vel.y *= 0.3;
   if (car.occupant === 'player') exitCar(w); // fling the driver clear first
@@ -226,6 +351,18 @@ function destroyCar(w: World, car: Car): void {
     if (e.hp <= 0) {
       e.alive = false;
       spawnDeath(w, e.pos, car.angle);
+      sfxEnemyDeath();
+    }
+  }
+  for (const c of w.civilians) {
+    if (!c.alive) continue;
+    if (Math.hypot(c.pos.x - car.pos.x, c.pos.y - car.pos.y) > r + c.radius) continue;
+    c.hp -= EXPLOSION_ENEMY_DMG;
+    c.panic = Math.max(c.panic, 3);
+    c.fleeFrom = { x: car.pos.x, y: car.pos.y };
+    if (c.hp <= 0 && c.alive) {
+      c.alive = false;
+      spawnDeath(w, c.pos, car.angle);
       sfxEnemyDeath();
     }
   }
@@ -262,37 +399,54 @@ export function carEffects(w: World, car: Car, dt: number): void {
   const nose = { x: car.pos.x + fwd.x * car.w * 0.3, y: car.pos.y + fwd.y * car.w * 0.3 };
 
   if (car.dead) {
+    // A fresh wreck is engulfed in flame for a few seconds, then dies down to a
+    // thin smoulder that lingers.
     car.smoke -= dt;
-    if (car.smoke <= 0) {
-      car.smoke = 0.24;
-      spawnSmokePuff(w, car.pos, 'black', 9 + Math.random() * 4);
+    if (car.wreckFire > 0) {
+      car.wreckFire -= dt;
+      if (car.smoke <= 0) {
+        car.smoke = 0.05;
+        spawnFire(w, { x: car.pos.x + randSpread(car.w * 0.32), y: car.pos.y + randSpread(car.h * 0.32) });
+        spawnSmokePuff(w, car.pos, 'black', 10 + Math.random() * 5);
+      }
+    } else if (car.smoke <= 0) {
+      car.smoke = 0.55;
+      spawnSmokePuff(w, car.pos, 'dark', 7 + Math.random() * 3);
     }
   } else {
     const frac = car.hp / car.maxHp;
     if (frac < BURN_HP) {
-      // On fire: flames + black smoke, and burning down to the explosion.
-      damageCar(w, car, car.maxHp * 0.05 * dt);
+      // Ablaze: flames + black smoke, burning down to the explosion at BURN_RATE
+      // (slow, so the fire is a stage you watch build rather than a blink).
+      damageCar(w, car, car.maxHp * BURN_RATE * dt);
       car.smoke -= dt;
       if (car.smoke <= 0) {
         car.smoke = 0.05;
         spawnFire(w, nose);
-        spawnSmokePuff(w, nose, 'black', 8 + Math.random() * 4);
+        spawnSmokePuff(w, nose, 'black', 9 + Math.random() * 4);
       }
     } else if (frac < SMOKE_HP) {
-      // Three smoke tiers before the fire.
+      // Graduated smoke: a faint wisp when first hurt, thickening and darkening
+      // through several tiers, then heavy black smoke licking embers just before
+      // it catches fire — a gradual ramp into the blaze, not a jump.
       let interval: number;
       let shade: 'light' | 'dark';
       let size: number;
-      if (frac < 0.28) {
-        interval = 0.06;
+      if (frac < 0.2) {
+        interval = 0.07;
+        shade = 'dark';
+        size = 10;
+        if (Math.random() < 0.28) spawnFire(w, nose); // embers flicker before ignition
+      } else if (frac < 0.32) {
+        interval = 0.1;
         shade = 'dark';
         size = 9;
-      } else if (frac < 0.44) {
-        interval = 0.09;
+      } else if (frac < 0.45) {
+        interval = 0.14;
         shade = 'light';
         size = 8;
       } else {
-        interval = 0.18;
+        interval = 0.24;
         shade = 'light';
         size = 5;
       }
@@ -392,6 +546,17 @@ export function nearestCarIndex(w: World, reach: number = ENTER_REACH): number {
 }
 
 export const AUTO_PATH_RANGE = 260; // press F within this to auto-walk to a car
+
+// The driver's door in world space — front-left of the car. The player walks
+// here before boarding rather than teleporting into the middle of the car.
+export function driverDoor(car: Car): Vec2 {
+  const fwd = fromAngle(car.angle);
+  const left = { x: fwd.y, y: -fwd.x };
+  return {
+    x: car.pos.x + fwd.x * car.w * 0.08 + left.x * (car.h * 0.55 + 6),
+    y: car.pos.y + fwd.y * car.w * 0.08 + left.y * (car.h * 0.55 + 6),
+  };
+}
 
 export function enterCar(w: World, idx: number): void {
   const car = w.cars[idx];
