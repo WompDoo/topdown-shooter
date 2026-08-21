@@ -31,6 +31,11 @@ export interface Weapon {
   arc: number; // half-arc in radians
   lunge: number; // forward dash speed on swing
   swingTime: number; // seconds between swings
+  // explosive projectile weapons (optional)
+  projectile?: 'grenade' | 'rocket';
+  blastRadius?: number;
+  projSpeed?: number; // launch speed (px/s)
+  projFuse?: number; // seconds until it auto-detonates
 }
 
 const GUN = {
@@ -181,6 +186,87 @@ export const HMG: Weapon = {
   adsSpreadMult: 0.55,
 };
 
+export const GRENADE: Weapon = {
+  ...GUN,
+  name: 'Frag Grenade',
+  sound: 'shotgun',
+  auto: false,
+  rpm: 70,
+  damage: 95, // blast damage at the centre
+  spreadMin: 0.03,
+  spreadMax: 0.03,
+  spreadPerShot: 0,
+  spreadRecover: 1,
+  mag: 3,
+  reloadTime: 2,
+  range: 500,
+  knockback: 220,
+  recoilKick: 0.02,
+  shake: 2,
+  muzzleSize: 0,
+  adsZoom: 1.15,
+  adsMoveMult: 0.72,
+  adsSpreadMult: 0.5,
+  projectile: 'grenade',
+  blastRadius: 130,
+  projSpeed: 360,
+  projFuse: 1.5,
+};
+
+export const GRENADE_LAUNCHER: Weapon = {
+  ...GUN,
+  name: 'Grenade Launcher',
+  sound: 'shotgun',
+  auto: false,
+  rpm: 75,
+  damage: 105,
+  spreadMin: 0.03,
+  spreadMax: 0.07,
+  spreadPerShot: 0.01,
+  spreadRecover: 1.4,
+  mag: 6,
+  reloadTime: 3,
+  range: 950,
+  knockback: 240,
+  recoilKick: 0.12,
+  shake: 5,
+  muzzleSize: 24,
+  adsZoom: 1.2,
+  adsMoveMult: 0.55,
+  adsSpreadMult: 0.55,
+  projectile: 'grenade',
+  blastRadius: 150,
+  projSpeed: 640,
+  projFuse: 2.4,
+};
+
+export const ROCKET_LAUNCHER: Weapon = {
+  ...GUN,
+  name: 'Rocket Launcher',
+  sound: 'sniper',
+  auto: false,
+  rpm: 40,
+  damage: 170,
+  spreadMin: 0.01,
+  spreadMax: 0.02,
+  spreadPerShot: 0,
+  spreadRecover: 1,
+  mag: 4,
+  reloadTime: 3.6,
+  range: 1600,
+  knockback: 300,
+  recoilKick: 0.22,
+  shake: 8,
+  muzzleSize: 30,
+  adsZoom: 1.28,
+  adsMoveMult: 0.45,
+  adsSpreadMult: 0.3,
+  projectile: 'rocket',
+  blastRadius: 200,
+  projSpeed: 740,
+  projFuse: 3,
+};
+
 export const KNIFE: Weapon = {
   ...GUN,
   kind: 'melee',
@@ -209,7 +295,9 @@ export const KNIFE: Weapon = {
   swingTime: 0.34,
 };
 
-export const PLAYER_WEAPONS: Weapon[] = [PISTOL, SMG, RIFLE, HMG, SHOTGUN, SNIPER, KNIFE];
+export const PLAYER_WEAPONS: Weapon[] = [
+  PISTOL, SMG, RIFLE, HMG, SHOTGUN, SNIPER, GRENADE, GRENADE_LAUNCHER, ROCKET_LAUNCHER, KNIFE,
+];
 
 // --- Enemy weapons ---
 

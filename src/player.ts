@@ -11,6 +11,7 @@ import { add, angleOf, approach, clamp, collideCircleSegment, fromAngle, len, ra
 import { fireInterval } from './weapon';
 import { barrelDist } from './weaponart';
 import { meleeHit, resolveShot } from './combat';
+import { spawnProjectile } from './projectile';
 import { addShake, spawnCasing, spawnMuzzle, spawnSlash } from './fx';
 import { sfxDryFire, sfxReload, sfxWeapon } from './audio';
 
@@ -204,16 +205,21 @@ export function updatePlayer(w: World, input: Input, aimWorld: Vec2, dt: number)
     const shootOrigin = add(p.pos, scale(aimDir, barrelDist(wpn, p.radius)));
     if (canFire && p.fireTimer <= 0) {
       const cone = Math.min(p.spread, wpn.spreadMax) * (1 + (wpn.adsSpreadMult - 1) * p.ads);
-      const pellets = Math.max(1, wpn.pellets);
-      for (let i = 0; i < pellets; i++) {
-        resolveShot(w, shootOrigin, p.aim + randSpread(cone), wpn.damage, wpn.range, 'player', wpn.knockback);
+      if (wpn.projectile) {
+        // lob / launch an explosive instead of a hitscan shot
+        spawnProjectile(w, shootOrigin, p.aim + randSpread(cone), wpn, 'player');
+      } else {
+        const pellets = Math.max(1, wpn.pellets);
+        for (let i = 0; i < pellets; i++) {
+          resolveShot(w, shootOrigin, p.aim + randSpread(cone), wpn.damage, wpn.range, 'player', wpn.knockback);
+        }
       }
       p.ammo -= 1;
       p.spread = Math.min(p.spread + wpn.spreadPerShot, wpn.spreadMax);
       p.aimKick = Math.min(p.aimKick + wpn.recoilKick, 0.6);
       p.muzzleTimer = 0.05;
-      spawnMuzzle(w, shootOrigin, p.aim, wpn.muzzleSize);
-      spawnCasing(w, shootOrigin, p.aim);
+      if (wpn.muzzleSize > 0) spawnMuzzle(w, shootOrigin, p.aim, wpn.muzzleSize);
+      if (!wpn.projectile) spawnCasing(w, shootOrigin, p.aim); // no shell for a lobbed grenade
       addShake(w, wpn.shake);
       sfxWeapon(wpn.sound);
       p.fireTimer = fireInterval(wpn);

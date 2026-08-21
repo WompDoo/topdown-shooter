@@ -78,6 +78,7 @@ export function render(
   drawCivilians(ctx, w);
   if (w.player.inCar < 0) drawPlayer(ctx, w);
   drawSlashes(ctx, w);
+  drawProjectiles(ctx, w);
   drawTracers(ctx, w);
   drawMuzzles(ctx, w);
   drawParticles(ctx, w);
@@ -364,12 +365,20 @@ function drawWeapon(
   if (!sheet || !art) return false;
   const w = art.sw * WEAPON_SCALE;
   const h = art.sh * WEAPON_SCALE;
+  const bx = GRIP_FWD - recoil; // grip sits here; barrel tip at bx + w
   ctx.save();
   ctx.translate(x, y);
   ctx.rotate(aim);
   if (Math.cos(aim) < 0) ctx.scale(1, -1);
   ctx.imageSmoothingEnabled = false; // keep the pixel art crisp
-  ctx.drawImage(sheet, art.sx, art.sy, art.sw, art.sh, GRIP_FWD - recoil, -h / 2, w, h);
+  if (art.flip) {
+    // west-facing source: mirror across x so the barrel points forward (+x),
+    // keeping the sprite in the same [bx, bx+w] forward span
+    ctx.scale(-1, 1);
+    ctx.drawImage(sheet, art.sx, art.sy, art.sw, art.sh, -bx - w, -h / 2, w, h);
+  } else {
+    ctx.drawImage(sheet, art.sx, art.sy, art.sw, art.sh, bx, -h / 2, w, h);
+  }
   ctx.restore();
   return true;
 }
@@ -546,6 +555,66 @@ function drawParticles(ctx: CanvasRenderingContext2D, w: World): void {
       ctx.arc(p.pos.x, p.pos.y, p.size, 0, Math.PI * 2);
       ctx.fill();
       ctx.globalAlpha = 1;
+    }
+  }
+}
+
+// Flying explosives: a finned rocket with an additive exhaust plume, or a small
+// spinning grenade that flashes red as its fuse runs down.
+function drawProjectiles(ctx: CanvasRenderingContext2D, w: World): void {
+  for (const pr of w.projectiles) {
+    if (pr.kind === 'rocket') {
+      const ang = Math.atan2(pr.vel.y, pr.vel.x);
+      ctx.save();
+      ctx.translate(pr.pos.x, pr.pos.y);
+      ctx.rotate(ang);
+      ctx.globalCompositeOperation = 'lighter';
+      const grd = ctx.createRadialGradient(-10, 0, 0, -10, 0, 15);
+      grd.addColorStop(0, 'rgba(255,236,180,0.9)');
+      grd.addColorStop(0.5, 'rgba(255,150,60,0.55)');
+      grd.addColorStop(1, 'rgba(255,90,30,0)');
+      ctx.fillStyle = grd;
+      ctx.beginPath();
+      ctx.arc(-10, 0, 15, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.fillStyle = '#3f4650'; // fins
+      ctx.fillRect(-9, -5, 3, 3);
+      ctx.fillRect(-9, 2, 3, 3);
+      ctx.fillStyle = '#2b2f36'; // body
+      ctx.fillRect(-8, -3, 14, 6);
+      ctx.fillStyle = '#c94f4f'; // nose cone
+      ctx.beginPath();
+      ctx.moveTo(6, -3);
+      ctx.lineTo(11, 0);
+      ctx.lineTo(6, 3);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    } else {
+      ctx.save();
+      ctx.translate(pr.pos.x, pr.pos.y);
+      ctx.rotate(pr.spin);
+      ctx.fillStyle = '#1c2416';
+      ctx.beginPath();
+      ctx.arc(0, 0, 6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#46592b';
+      ctx.beginPath();
+      ctx.arc(0, 0, 4.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#12160d'; // fuse spoon
+      ctx.fillRect(-1.5, -7.5, 3, 3);
+      ctx.fillStyle = 'rgba(255,255,255,0.22)'; // spin band
+      ctx.fillRect(-4.5, -1, 9, 1.5);
+      ctx.restore();
+      if (pr.fuse < 0.6) {
+        const a = (Math.sin(pr.fuse * 40) * 0.5 + 0.5) * 0.55;
+        ctx.fillStyle = `rgba(255,80,60,${a})`;
+        ctx.beginPath();
+        ctx.arc(pr.pos.x, pr.pos.y, 9, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
   }
 }

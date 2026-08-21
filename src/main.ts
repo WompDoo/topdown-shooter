@@ -6,6 +6,7 @@ import { buildWorld, DEFAULT_LOADOUT } from './world';
 import { equipWeapon, updatePlayer } from './player';
 import { updateEnemies } from './enemy';
 import { updateCivilians } from './civilian';
+import { updateProjectiles } from './projectile';
 import { updateFx } from './fx';
 import {
   AUTO_PATH_RANGE,
@@ -92,6 +93,7 @@ function fixedUpdate(dt: number): void {
     }
     updateEnemies(w, dt);
     updateCivilians(w, dt);
+    updateProjectiles(w, dt);
     // Weapon pickups: walk over one to equip it (swaps the active slot).
     if (p.inCar < 0 && !p.downed && p.dive <= 0) {
       for (const pk of w.pickups) {

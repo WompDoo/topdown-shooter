@@ -11,6 +11,7 @@ export interface WeaponArt {
   sy: number;
   sw: number;
   sh: number;
+  flip?: boolean; // source sprite faces west (barrel -x); mirror it to point east
 }
 
 export const WEAPON_SCALE = 0.8; // world px per source pixel
@@ -22,6 +23,9 @@ const ART: Record<string, WeaponArt> = {
   'Vector SMG': { sx: 96, sy: 144, sw: 25, sh: 12 },
   'MK-7 Carbine': { sx: 288, sy: 0, sw: 33, sh: 11 },
   'M60 HMG': { sx: 288, sy: 168, sw: 45, sh: 11 },
+  'Frag Grenade': { sx: 0, sy: 121, sw: 10, sh: 7 },
+  'Grenade Launcher': { sx: 336, sy: 0, sw: 33, sh: 12, flip: true },
+  'Rocket Launcher': { sx: 384, sy: 0, sw: 36, sh: 18, flip: true },
   Breacher: { sx: 144, sy: 24, sw: 39, sh: 9 },
   Longshot: { sx: 240, sy: 144, sw: 45, sh: 13 },
   'Combat Knife': { sx: 48, sy: 216, sw: 8, sh: 7 },
